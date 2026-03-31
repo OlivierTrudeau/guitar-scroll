@@ -276,7 +276,7 @@
       if (!scrolling) return;
       const dt = now - last;
       last = now;
-      accum += speed * dt * 0.12;
+      accum += speed * dt * 0.04;
       if (accum >= 1) {
         const px = Math.floor(accum);
         songContent.scrollTop += px;
@@ -468,8 +468,8 @@ Maybe I'm wrong and maybe you're right`;
   editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
 
   scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });
-  scrollSlower.addEventListener("click", () => { speed = Math.max(0.2, +(speed - 0.2).toFixed(1)); updateSpeedLabel(); });
-  scrollFaster.addEventListener("click", () => { speed = Math.min(5.0, +(speed + 0.2).toFixed(1)); updateSpeedLabel(); });
+  scrollSlower.addEventListener("click", () => { speed = Math.max(0.1, +(speed - 0.1).toFixed(1)); updateSpeedLabel(); });
+  scrollFaster.addEventListener("click", () => { speed = Math.min(5.0, +(speed + 0.1).toFixed(1)); updateSpeedLabel(); });
 
   // ── Init ──
   loadSongs();
