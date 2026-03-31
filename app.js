@@ -270,12 +270,18 @@
     scrollToggle.textContent = "⏸";
     scrollToggle.classList.add("active");
     let last = performance.now();
+    let accum = 0;
 
     function tick(now) {
       if (!scrolling) return;
       const dt = now - last;
       last = now;
-      songContent.scrollTop += speed * dt * 0.08;
+      accum += speed * dt * 0.12;
+      if (accum >= 1) {
+        const px = Math.floor(accum);
+        songContent.scrollTop += px;
+        accum -= px;
+      }
       const maxScroll = songContent.scrollHeight - songContent.clientHeight;
       if (songContent.scrollTop >= maxScroll) {
         stopScroll();
