@@ -275,7 +275,7 @@
       if (!scrolling) return;
       const dt = now - last;
       last = now;
-      songContent.scrollTop += speed * dt * 0.03;
+      songContent.scrollTop += speed * dt * 0.08;
       const maxScroll = songContent.scrollHeight - songContent.clientHeight;
       if (songContent.scrollTop >= maxScroll) {
         stopScroll();
