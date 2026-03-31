@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a1a2e">
+  <title>GuitarScroll</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- SONG LIST VIEW -->
+    <div id="library-view" class="view active">
+      <header class="top-bar">
+        <h1>GuitarScroll</h1>
+        <button id="add-song-btn" class="icon-btn" aria-label="Add song">＋</button>
+      </header>
+      <div id="song-list" class="song-list"></div>
+      <div id="empty-state" class="empty-state">
+        <p>No songs yet</p>
+        <p class="sub">Tap ＋ to add your first song</p>
+      </div>
+    </div>
+
+    <!-- ADD / EDIT SONG VIEW -->
+    <div id="edit-view" class="view">
+      <header class="top-bar">
+        <button id="edit-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <h1 id="edit-title">Add Song</h1>
+        <button id="save-song-btn" class="icon-btn" aria-label="Save">✓</button>
+      </header>
+      <div class="edit-form">
+        <input id="song-title-input" type="text" placeholder="Song title" autocomplete="off">
+        <input id="song-artist-input" type="text" placeholder="Artist" autocomplete="off">
+        <input id="song-capo-input" type="text" placeholder="Capo (e.g. 2nd fret)" autocomplete="off">
+        <input id="song-tuning-input" type="text" placeholder="Tuning (e.g. Standard)" autocomplete="off">
+        <input id="song-strum-input" type="text" placeholder="Strumming pattern (e.g. D DU UDU)" autocomplete="off">
+        <textarea id="song-body-input" placeholder="Paste chords & lyrics here...&#10;&#10;Supports formats like:&#10;&#10;[Verse 1]&#10;C              Am&#10;Heart on my sleeve&#10;&#10;Or inline: [C]Heart on my [Am]sleeve"></textarea>
+      </div>
+    </div>
+
+    <!-- SONG PLAYER VIEW -->
+    <div id="player-view" class="view">
+      <header class="top-bar player-bar">
+        <button id="player-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <div class="player-title-wrap">
+          <h1 id="player-song-title"></h1>
+          <span id="player-song-artist" class="artist-sub"></span>
+        </div>
+        <button id="edit-current-btn" class="icon-btn" aria-label="Edit">✎</button>
+      </header>
+      <div id="song-meta" class="song-meta"></div>
+      <div id="song-content" class="song-content"></div>
+      <div id="scroll-controls" class="scroll-controls">
+        <button id="scroll-slower" class="ctrl-btn">−</button>
+        <button id="scroll-toggle" class="ctrl-btn play-btn">▶</button>
+        <button id="scroll-faster" class="ctrl-btn">＋</button>
+        <span id="speed-label" class="speed-label">1.0×</span>
+      </div>
+    </div>
+
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

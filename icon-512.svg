@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="100" fill="#1a1a2e"/>
+  <text x="256" y="210" text-anchor="middle" font-family="Arial, sans-serif" font-size="160" fill="#7c6aef">j</text>
+  <text x="256" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="58" fill="#f0c050">SCROLL</text>
+  <rect x="140" y="380" width="232" height="10" rx="5" fill="#7c6aef" opacity="0.5"/>
+  <rect x="110" y="405" width="292" height="10" rx="5" fill="#7c6aef" opacity="0.3"/>
+  <rect x="150" y="430" width="212" height="10" rx="5" fill="#7c6aef" opacity="0.15"/>
+</svg>
