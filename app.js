@@ -50,6 +50,23 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(songs));
   }
 
+  function mergeSongsFromRepo() {
+    return fetch("songs.json?t=" + Date.now())
+      .then((r) => r.ok ? r.json() : [])
+      .then((repoSongs) => {
+        let added = 0;
+        for (const rs of repoSongs) {
+          if (!songs.find((s) => s.id === rs.id)) {
+            songs.push(rs);
+            added++;
+          }
+        }
+        if (added) saveSongs();
+        return added;
+      })
+      .catch(() => 0);
+  }
+
   // ── Views ──
   function showView(view) {
     [libraryView, editView, playerView].forEach((v) => v.classList.remove("active"));
@@ -339,120 +356,6 @@
     return { title, artist, capo, tuning, strum, body };
   }
 
-  // ── Seed demo song ──
-  function seedDemoSong() {
-    const demoBody = `[Intro]
-C Am7 Em Fmaj7
-
-[Verse 1]
-C                                     Am7
-Heart on my sleeve, sorry if I've been cold
-                                   Em
-I was more hurt than what I had led on
-                                      Fmaj7
-But I'm never scared to admit when I'm wrong
-C                                     Am7
-I took down the pictures I kept on my walls
-                                     Em
-I got so mad I wrote three different songs
-                                            Fmaj7
-But I scrapped them all 'cause it's not what I want
-
-[Pre-Chorus]
-G*
-So can we stop?
-
-[Chorus]
-        Am7    Fmaj7
-Because I'm so tired
-      C       G
-I put away my pride
-                Am7                  Fmaj7
-That's 'cause I love you too much to fight
-             C
-Or maybe I'm wrong
-                 G
-And maybe you're right
-                    Am7     Fmaj7
-And I'll know we'll both be fine
-              C         G
-It just might take some time
-           Am7                  Fmaj7
-You know I love you too much to fight
-             C
-Or maybe I'm wrong
-                 G
-And maybe you're right
-            C
-Maybe, yeah
-
-[Verse 2]
-C                                 Am7
-I'm well aware that it's over and done
-                                      Em
-Yeah, I can admit that I lost and you won
-                                     Fmaj7
-Whatever you need so that we can move on
-       C
-When I think 'bout the good times, the anger dissolves
-Am7
-Can't have each other, but still got these songs
-Em                                          Fmaj7
-Part of my life, you'll never completely be gone
-
-[Pre-Chorus]
-G*
-So can we stop?
-
-[Chorus]
-        Am7    Fmaj7
-Because I'm so tired
-      C       G
-I put away my pride
-                Am7                  Fmaj7
-That's 'cause I love you too much to fight
-             C
-Or maybe I'm wrong
-                 G
-And maybe you're right
-                    Am7     Fmaj7
-And I'll know we'll both be fine
-              C         G
-It just might take some time
-           Am7                  Fmaj7
-You know I love you too much to fight
-             C
-Or maybe I'm wrong
-                 G
-And maybe you're right
-
-Maybe, yeah
-
-[Bridge]
-Am7 Fmaj7 C G  x4
-
-[Outro]
-                Am*     Fmaj7*
-I'll know we'll both be fine
-              C*        G*
-It just might take some time
-           Am*                  Fmaj7*
-You know I love you too much to fight
-          C*                     G*
-Maybe I'm wrong and maybe you're right`;
-
-    songs.push({
-      id: "demo_maybe_im_wrong",
-      title: "Maybe I'm Wrong",
-      artist: "Kid Laroi",
-      capo: "No capo",
-      tuning: "E A D G B E",
-      strum: "* = strum once",
-      body: demoBody,
-    });
-    saveSongs();
-  }
-
   // ── Helpers ──
   function esc(s) {
     const d = document.createElement("div");
@@ -473,7 +376,7 @@ Maybe I'm wrong and maybe you're right`;
 
   // ── Init ──
   loadSongs();
-  if (!songs.length) seedDemoSong();
+  mergeSongsFromRepo().then(() => renderLibrary());
   renderLibrary();
   updateSpeedLabel();
 
