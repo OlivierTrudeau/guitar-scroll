@@ -21,7 +21,25 @@
       <header class="top-bar">
         <h1>GuitarScroll</h1>
         <button id="add-song-btn" class="icon-btn" aria-label="Add song">＋</button>
+        <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
       </header>
+      <div id="menu-dropdown" class="menu-dropdown hidden">
+        <button id="export-btn" class="menu-item">Export backup</button>
+        <button id="import-btn" class="menu-item">Import backup</button>
+        <input id="import-file" type="file" accept=".json" hidden>
+      </div>
+      <div class="filter-bar">
+        <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
+        <div id="proficiency-filter" class="proficiency-filter">
+          <button class="filter-pill active" data-level="all">All</button>
+          <button class="filter-pill" data-level="1">1</button>
+          <button class="filter-pill" data-level="2">2</button>
+          <button class="filter-pill" data-level="3">3</button>
+          <button class="filter-pill" data-level="4">4</button>
+          <button class="filter-pill" data-level="5">5</button>
+          <button class="filter-pill" data-level="0">Unrated</button>
+        </div>
+      </div>
       <div id="song-list" class="song-list"></div>
       <div id="empty-state" class="empty-state">
         <p>No songs yet</p>
@@ -42,6 +60,17 @@
         <input id="song-capo-input" type="text" placeholder="Capo (e.g. 2nd fret)" autocomplete="off">
         <input id="song-tuning-input" type="text" placeholder="Tuning (e.g. Standard)" autocomplete="off">
         <input id="song-strum-input" type="text" placeholder="Strumming pattern (e.g. D DU UDU)" autocomplete="off">
+        <div class="proficiency-edit">
+          <label for="song-proficiency-input">How well do I know this?</label>
+          <div id="proficiency-stars" class="proficiency-stars">
+            <button type="button" class="star-btn" data-value="1">★</button>
+            <button type="button" class="star-btn" data-value="2">★</button>
+            <button type="button" class="star-btn" data-value="3">★</button>
+            <button type="button" class="star-btn" data-value="4">★</button>
+            <button type="button" class="star-btn" data-value="5">★</button>
+          </div>
+          <span id="proficiency-label" class="proficiency-label">Not rated</span>
+        </div>
         <textarea id="song-body-input" placeholder="Paste chords & lyrics here...&#10;&#10;Supports formats like:&#10;&#10;[Verse 1]&#10;C              Am&#10;Heart on my sleeve&#10;&#10;Or inline: [C]Heart on my [Am]sleeve"></textarea>
       </div>
     </div>

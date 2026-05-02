@@ -30,6 +30,15 @@
   const scrollSlower = $("#scroll-slower");
   const scrollFaster = $("#scroll-faster");
   const speedLabel = $("#speed-label");
+  const searchInput = $("#search-input");
+  const proficiencyFilter = $("#proficiency-filter");
+  const proficiencyStarsEl = $("#proficiency-stars");
+  const proficiencyLabel = $("#proficiency-label");
+  const menuBtn = $("#menu-btn");
+  const menuDropdown = $("#menu-dropdown");
+  const exportBtn = $("#export-btn");
+  const importBtn = $("#import-btn");
+  const importFile = $("#import-file");
 
   let songs = [];
   let editingId = null;
@@ -37,6 +46,9 @@
   let scrolling = false;
   let speed = 10;
   let scrollRAF = null;
+  let editingProficiency = 0;
+  let activeFilterLevel = "all";
+  let searchQuery = "";
 
   // ── Persistence ──
   function loadSongs() {
@@ -75,16 +87,57 @@
   }
 
   // ── Library ──
+  function getFilteredSongs() {
+    return songs.filter((song) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const matchesTitle = (song.title || "").toLowerCase().includes(q);
+        const matchesArtist = (song.artist || "").toLowerCase().includes(q);
+        if (!matchesTitle && !matchesArtist) return false;
+      }
+      if (activeFilterLevel !== "all") {
+        const level = parseInt(activeFilterLevel, 10);
+        const songLevel = song.proficiency || 0;
+        if (songLevel !== level) return false;
+      }
+      return true;
+    });
+  }
+
+  function proficiencyStars(level) {
+    if (!level) return '<span class="prof-badge unrated">Not rated</span>';
+    const labels = ["", "Learning", "Rough", "Decent", "Good", "Nailed it"];
+    let stars = "";
+    for (let i = 1; i <= 5; i++) {
+      stars += i <= level ? '<span class="star filled">★</span>' : '<span class="star">★</span>';
+    }
+    return `<span class="prof-badge level-${level}">${stars} <span class="prof-text">${labels[level]}</span></span>`;
+  }
+
   function renderLibrary() {
     songListEl.innerHTML = "";
-    emptyState.style.display = songs.length ? "none" : "flex";
-    songs.forEach((song) => {
+    const filtered = getFilteredSongs();
+    const hasAnySongs = songs.length > 0;
+    const hasResults = filtered.length > 0;
+
+    emptyState.style.display = hasAnySongs ? "none" : "flex";
+
+    if (hasAnySongs && !hasResults) {
+      const noResults = document.createElement("div");
+      noResults.className = "no-results";
+      noResults.textContent = "No songs match your filters";
+      songListEl.appendChild(noResults);
+      return;
+    }
+
+    filtered.forEach((song) => {
       const el = document.createElement("div");
       el.className = "song-item";
       el.innerHTML = `
         <div class="song-item-info">
           <div class="song-item-title">${esc(song.title || "Untitled")}</div>
           <div class="song-item-artist">${esc(song.artist || "")}</div>
+          <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
         </div>
         <button class="song-item-delete" data-id="${song.id}" aria-label="Delete">✕</button>`;
       el.querySelector(".song-item-info").addEventListener("click", () => openPlayer(song.id));
@@ -100,6 +153,24 @@
     });
   }
 
+  // ── Proficiency stars (editor) ──
+  function updateEditorStars() {
+    const labels = ["Not rated", "Learning", "Rough", "Decent", "Good", "Nailed it"];
+    proficiencyStarsEl.querySelectorAll(".star-btn").forEach((btn) => {
+      const v = parseInt(btn.dataset.value, 10);
+      btn.classList.toggle("active", v <= editingProficiency);
+    });
+    proficiencyLabel.textContent = labels[editingProficiency];
+  }
+
+  proficiencyStarsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".star-btn");
+    if (!btn) return;
+    const val = parseInt(btn.dataset.value, 10);
+    editingProficiency = val === editingProficiency ? 0 : val;
+    updateEditorStars();
+  });
+
   // ── Edit ──
   function openEditor(id) {
     editingId = id;
@@ -111,6 +182,8 @@
     tuningInput.value = song ? song.tuning : "";
     strumInput.value = song ? song.strum : "";
     bodyInput.value = song ? song.body : "";
+    editingProficiency = song ? (song.proficiency || 0) : 0;
+    updateEditorStars();
     showView(editView);
     titleInput.focus();
   }
@@ -128,6 +201,7 @@
           capo: capoInput.value.trim(),
           tuning: tuningInput.value.trim(),
           strum: strumInput.value.trim(),
+          proficiency: editingProficiency,
           body,
         });
       }
@@ -139,6 +213,7 @@
         capo: capoInput.value.trim(),
         tuning: tuningInput.value.trim(),
         strum: strumInput.value.trim(),
+        proficiency: editingProficiency,
         body,
       });
     }
@@ -284,7 +359,7 @@
   // ── Auto-scroll ──
   function startScroll() {
     scrolling = true;
-    scrollToggle.textContent = "⏸";
+    scrollToggle.textContent = "❚❚";
     scrollToggle.classList.add("active");
     let last = performance.now();
     let accum = 0;
@@ -373,6 +448,84 @@
   scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });
   scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
   scrollFaster.addEventListener("click", () => { speed = Math.min(50, speed + 1); updateSpeedLabel(); });
+
+  searchInput.addEventListener("input", () => {
+    searchQuery = searchInput.value.trim();
+    renderLibrary();
+  });
+
+  proficiencyFilter.addEventListener("click", (e) => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill) return;
+    proficiencyFilter.querySelectorAll(".filter-pill").forEach((p) => p.classList.remove("active"));
+    pill.classList.add("active");
+    activeFilterLevel = pill.dataset.level;
+    renderLibrary();
+  });
+
+  // ── Menu / Backup ──
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menuDropdown.classList.toggle("hidden");
+  });
+
+  document.addEventListener("click", () => {
+    menuDropdown.classList.add("hidden");
+  });
+
+  menuDropdown.addEventListener("click", (e) => {
+    e.stopPropagation();
+  });
+
+  exportBtn.addEventListener("click", () => {
+    menuDropdown.classList.add("hidden");
+    const data = JSON.stringify(songs, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const date = new Date().toISOString().slice(0, 10);
+    a.download = `guitarscroll-backup-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  importBtn.addEventListener("click", () => {
+    menuDropdown.classList.add("hidden");
+    importFile.click();
+  });
+
+  importFile.addEventListener("change", () => {
+    const file = importFile.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const imported = JSON.parse(reader.result);
+        if (!Array.isArray(imported)) throw new Error("not an array");
+        let added = 0;
+        let updated = 0;
+        for (const s of imported) {
+          if (!s.id || !s.title) continue;
+          const existing = songs.find((x) => x.id === s.id);
+          if (existing) {
+            Object.assign(existing, s);
+            updated++;
+          } else {
+            songs.push(s);
+            added++;
+          }
+        }
+        saveSongs();
+        renderLibrary();
+        alert(`Import done: ${added} added, ${updated} updated.`);
+      } catch {
+        alert("Invalid backup file.");
+      }
+      importFile.value = "";
+    };
+    reader.readAsText(file);
+  });
 
   // ── Init ──
   loadSongs();
