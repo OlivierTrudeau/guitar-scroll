@@ -558,10 +558,6 @@
     }
   }
 
-  function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   // Jina HTML: reliable CORS + rendered strumming pattern classes + chord sheet
   async function fetchSongFromJinaHtml(url) {
     const raw = await fetchText("https://r.jina.ai/" + url, {
