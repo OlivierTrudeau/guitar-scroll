@@ -513,7 +513,11 @@
     try {
       const song = await importFromUltimateGuitar(url);
       applyImportedSong(song);
-      setUgStatus("Imported — check the fields, then tap ✓ to save.", "ok");
+      if (song.strum) {
+        setUgStatus("Imported — check the fields, then tap ✓ to save.", "ok");
+      } else {
+        setUgStatus("Imported — add a strumming pattern if you know it, then tap ✓.", "ok");
+      }
       if (window.Analytics) {
         window.Analytics.track("ug-import", {
           title: song.title || "",
