@@ -21,6 +21,7 @@
       <header class="top-bar">
         <h1>GuitarScroll</h1>
         <button id="tuner-btn" class="text-btn" aria-label="Tuner">Tuner</button>
+        <button id="calendar-btn" class="icon-btn" aria-label="Practice calendar">📅</button>
         <button id="add-song-btn" class="icon-btn" aria-label="Add song">＋</button>
         <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
       </header>
@@ -28,21 +29,6 @@
         <button id="export-btn" class="menu-item">Export backup</button>
         <button id="import-btn" class="menu-item">Import backup</button>
         <input id="import-file" type="file" accept=".json" hidden>
-      </div>
-      <!-- Duolingo-style daily practice summary -->
-      <div id="streak-banner" class="streak-banner">
-        <div class="streak-stat">
-          <span id="streak-count" class="streak-num">0</span>
-          <span class="streak-label">🔥 day streak</span>
-        </div>
-        <div class="streak-stat">
-          <span id="today-count" class="streak-num">0</span>
-          <span class="streak-label">🎸 played today</span>
-        </div>
-        <div class="streak-stat">
-          <span id="total-count" class="streak-num">0</span>
-          <span class="streak-label">✅ total sessions</span>
-        </div>
       </div>
       <div class="filter-bar">
         <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
@@ -120,7 +106,6 @@
           <h1 id="player-song-title"></h1>
           <span id="player-song-artist" class="artist-sub"></span>
         </div>
-        <button id="stats-current-btn" class="icon-btn" aria-label="Practice stats">📊</button>
         <button id="edit-current-btn" class="icon-btn" aria-label="Edit">✎</button>
       </header>
       <div id="song-meta" class="song-meta"></div>
@@ -133,28 +118,25 @@
       </div>
     </div>
 
-    <!-- PRACTICE STATS VIEW -->
+    <!-- PRACTICE CALENDAR VIEW (global, not per-song) -->
     <div id="stats-view" class="view">
       <header class="top-bar">
         <button id="stats-back-btn" class="icon-btn" aria-label="Back">←</button>
-        <div class="player-title-wrap">
-          <h1 id="stats-song-title"></h1>
-          <span id="stats-song-artist" class="artist-sub"></span>
-        </div>
+        <h1>Practice</h1>
       </header>
       <div class="stats-body">
         <div class="stats-cards">
-          <div class="stats-card">
-            <span id="stats-total" class="stats-num">0</span>
-            <span class="stats-card-label">Times practiced</span>
-          </div>
           <div class="stats-card">
             <span id="stats-streak" class="stats-num">0</span>
             <span class="stats-card-label">Day streak</span>
           </div>
           <div class="stats-card">
-            <span id="stats-last" class="stats-num">–</span>
-            <span class="stats-card-label">Last played</span>
+            <span id="stats-today" class="stats-num">0</span>
+            <span class="stats-card-label">Played today</span>
+          </div>
+          <div class="stats-card">
+            <span id="stats-total" class="stats-num">0</span>
+            <span class="stats-card-label">Total sessions</span>
           </div>
         </div>
         <h2 class="stats-heading">Practice calendar</h2>

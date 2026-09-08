@@ -11,6 +11,7 @@
   const songListEl = $("#song-list");
   const emptyState = $("#empty-state");
   const addSongBtn = $("#add-song-btn");
+  const calendarBtn = $("#calendar-btn");
   const editBackBtn = $("#edit-back-btn");
   const saveSongBtn = $("#save-song-btn");
   const editTitle = $("#edit-title");
@@ -28,7 +29,6 @@
   const playerSongTitle = $("#player-song-title");
   const playerSongArtist = $("#player-song-artist");
   const editCurrentBtn = $("#edit-current-btn");
-  const statsCurrentBtn = $("#stats-current-btn");
   const songMeta = $("#song-meta");
   const songContent = $("#song-content");
   const scrollToggle = $("#scroll-toggle");
@@ -55,17 +55,12 @@
   const exportBtn = $("#export-btn");
   const importBtn = $("#import-btn");
   const importFile = $("#import-file");
-  // Streak banner (library) + stats view refs
-  const streakCountEl = $("#streak-count");
-  const todayCountEl = $("#today-count");
-  const totalCountEl = $("#total-count");
+  // Global practice calendar view
   const statsView = $("#stats-view");
   const statsBackBtn = $("#stats-back-btn");
-  const statsSongTitle = $("#stats-song-title");
-  const statsSongArtist = $("#stats-song-artist");
   const statsTotalEl = $("#stats-total");
   const statsStreakEl = $("#stats-streak");
-  const statsLastEl = $("#stats-last");
+  const statsTodayEl = $("#stats-today");
   const statsCalendarEl = $("#stats-calendar");
 
   let songs = [];
@@ -932,7 +927,6 @@
       renderLastPlayedMeta(song);
     }
     renderLibrary();
-    renderStreakBanner();
     if (window.Analytics) window.Analytics.track("song-practiced");
   }
 
@@ -1135,12 +1129,22 @@
     return `<span class="practice-badge">🎸 ${n}×</span>`;
   }
 
-  // ── Streak banner (Duolingo-style daily summary) ──
-  function renderStreakBanner() {
+  // ── Global practice calendar (streaks + heatmap) ──
+  function practiceCountByDay() {
+    const counts = new Map();
+    for (const s of songs) {
+      if (!Array.isArray(s.practiceLog)) continue;
+      for (const ts of s.practiceLog) {
+        const day = startOfDay(ts);
+        counts.set(day, (counts.get(day) || 0) + 1);
+      }
+    }
+    return counts;
+  }
+
+  function openPracticeCalendar() {
     const daySet = practicedDaySet();
     const streak = computeStreak(daySet);
-
-    // Sessions logged today across all songs
     const today = startOfDay(Date.now());
     let todayCount = 0;
     let total = 0;
@@ -1150,36 +1154,18 @@
       todayCount += s.practiceLog.filter((ts) => startOfDay(ts) === today).length;
     }
 
-    streakCountEl.textContent = streak;
-    todayCountEl.textContent = todayCount;
-    totalCountEl.textContent = total;
-    // Light up the streak when it's active so it feels rewarding
-    streakCountEl.parentElement.classList.toggle("active", streak > 0);
-  }
+    statsStreakEl.textContent = streak;
+    statsTodayEl.textContent = todayCount;
+    statsTotalEl.textContent = total;
+    statsStreakEl.parentElement.classList.toggle("active", streak > 0);
 
-  // ── Per-song practice stats + calendar ──
-  function openStats(id) {
-    const song = songs.find((s) => s.id === id);
-    if (!song) return;
-    const log = Array.isArray(song.practiceLog) ? song.practiceLog : [];
-
-    statsSongTitle.textContent = song.title || "Untitled";
-    statsSongArtist.textContent = song.artist || "";
-
-    statsTotalEl.textContent = song.practiceCount || log.length || 0;
-
-    // Per-song streak uses only this song's practice days
-    const songDays = new Set(log.map((ts) => startOfDay(ts)));
-    statsStreakEl.textContent = computeStreak(songDays);
-    statsLastEl.textContent = formatLastPlayed(song.lastPlayed);
-
-    renderCalendar(songDays);
+    renderCalendar(practiceCountByDay());
     showView(statsView);
     if (window.Analytics) window.Analytics.track("stats-open");
   }
 
   // Renders a GitHub-style heatmap for roughly the last ~18 weeks of practice
-  function renderCalendar(daySet) {
+  function renderCalendar(dayCounts) {
     const WEEKS = 18;
     const oneDay = 24 * 60 * 60 * 1000;
     statsCalendarEl.innerHTML = "";
@@ -1198,11 +1184,16 @@
       if (dayTs > today) {
         cell.className = "cal-cell future";
       } else {
-        const practiced = daySet.has(dayTs);
-        // Simple two-level intensity: practiced vs not (kept simple per request)
-        cell.className = "cal-cell " + (practiced ? "lvl-3" : "lvl-0");
+        const count = dayCounts.get(dayTs) || 0;
+        let lvl = "lvl-0";
+        if (count >= 3) lvl = "lvl-3";
+        else if (count === 2) lvl = "lvl-2";
+        else if (count === 1) lvl = "lvl-1";
+        cell.className = "cal-cell " + lvl;
         const d = new Date(dayTs);
-        cell.title = d.toLocaleDateString() + (practiced ? " — practiced" : "");
+        cell.title =
+          d.toLocaleDateString() +
+          (count ? ` — ${count} session${count === 1 ? "" : "s"}` : "");
       }
       statsCalendarEl.appendChild(cell);
     }
@@ -1403,6 +1394,7 @@
 
   // ── Event Wiring ──
   addSongBtn.addEventListener("click", () => openEditor(null));
+  calendarBtn.addEventListener("click", openPracticeCalendar);
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
   ugImportBtn.addEventListener("click", handleUgImport);
@@ -1414,8 +1406,7 @@
   });
   playerBackBtn.addEventListener("click", () => { showView(libraryView); stopScroll(); });
   editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
-  statsCurrentBtn.addEventListener("click", () => openStats(currentSongId));
-  statsBackBtn.addEventListener("click", () => openPlayer(currentSongId));
+  statsBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
 
   // Tuner: open/close and start/stop mic listening
   tunerBtn.addEventListener("click", openTuner);
@@ -1503,7 +1494,6 @@
         }
         saveSongs();
         renderLibrary();
-        renderStreakBanner();
         alert(`Import done: ${added} added, ${updated} updated.`);
       } catch {
         alert("Invalid backup file.");
@@ -1516,9 +1506,8 @@
   // ── Init ──
   loadSongs();
   migratePracticeData();
-  mergeSongsFromRepo().then(() => { renderLibrary(); renderStreakBanner(); });
+  mergeSongsFromRepo().then(() => { renderLibrary(); });
   renderLibrary();
-  renderStreakBanner();
   updateSpeedLabel();
 
   // ── Service Worker ──
