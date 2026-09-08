@@ -31,7 +31,23 @@
         <input id="import-file" type="file" accept=".json" hidden>
       </div>
       <div class="filter-bar">
-        <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
+        <div class="search-row">
+          <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
+          <div class="sort-wrap">
+            <button id="sort-btn" class="sort-btn" type="button" aria-label="Sort songs" aria-haspopup="true" aria-expanded="false">
+              <svg class="sort-btn-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M3 5h18v2H3V5zm4 6h10v2H7v-2zm3 6h4v2h-4v-2z"/>
+              </svg>
+              <span class="sort-btn-caret" aria-hidden="true">▾</span>
+            </button>
+            <div id="sort-dropdown" class="sort-dropdown hidden" role="menu">
+              <button class="sort-option active" data-sort="default" role="menuitem">Default</button>
+              <button class="sort-option" data-sort="rusty" role="menuitem">Oldest / least recent</button>
+              <button class="sort-option" data-sort="recent" role="menuitem">Recently played</button>
+              <button class="sort-option" data-sort="most" role="menuitem">Most practiced</button>
+            </div>
+          </div>
+        </div>
         <div id="proficiency-filter" class="proficiency-filter">
           <button class="filter-pill active" data-level="all">All</button>
           <button class="filter-pill" data-level="1">1</button>
@@ -40,12 +56,6 @@
           <button class="filter-pill" data-level="4">4</button>
           <button class="filter-pill" data-level="5">5</button>
           <button class="filter-pill" data-level="0">Unrated</button>
-        </div>
-        <div id="sort-filter" class="proficiency-filter">
-          <button class="filter-pill sort-pill active" data-sort="default">Default</button>
-          <button class="filter-pill sort-pill" data-sort="rusty">🕸️ Least recent</button>
-          <button class="filter-pill sort-pill" data-sort="recent">Recently played</button>
-          <button class="filter-pill sort-pill" data-sort="most">🎸 Most practiced</button>
         </div>
       </div>
       <div id="song-list" class="song-list"></div>

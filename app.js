@@ -37,7 +37,8 @@
   const speedLabel = $("#speed-label");
   const searchInput = $("#search-input");
   const proficiencyFilter = $("#proficiency-filter");
-  const sortFilter = $("#sort-filter");
+  const sortBtn = $("#sort-btn");
+  const sortDropdown = $("#sort-dropdown");
   const proficiencyStarsEl = $("#proficiency-stars");
   const proficiencyLabel = $("#proficiency-label");
   const menuBtn = $("#menu-btn");
@@ -1430,23 +1431,49 @@
     renderLibrary();
   });
 
-  sortFilter.addEventListener("click", (e) => {
-    const pill = e.target.closest(".filter-pill");
-    if (!pill) return;
-    sortFilter.querySelectorAll(".filter-pill").forEach((p) => p.classList.remove("active"));
-    pill.classList.add("active");
-    activeSort = pill.dataset.sort;
+  function syncSortUI() {
+    sortDropdown.querySelectorAll(".sort-option").forEach((opt) => {
+      opt.classList.toggle("active", opt.dataset.sort === activeSort);
+    });
+    sortBtn.classList.toggle("is-active", activeSort !== "default");
+    const open = !sortDropdown.classList.contains("hidden");
+    sortBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    sortBtn.classList.toggle("is-open", open);
+  }
+
+  function closeSortDropdown() {
+    sortDropdown.classList.add("hidden");
+    sortBtn.classList.remove("is-open");
+    sortBtn.setAttribute("aria-expanded", "false");
+  }
+
+  sortBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menuDropdown.classList.add("hidden");
+    sortDropdown.classList.toggle("hidden");
+    syncSortUI();
+  });
+
+  sortDropdown.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const opt = e.target.closest(".sort-option");
+    if (!opt) return;
+    activeSort = opt.dataset.sort;
+    closeSortDropdown();
+    syncSortUI();
     renderLibrary();
   });
 
   // ── Menu / Backup ──
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeSortDropdown();
     menuDropdown.classList.toggle("hidden");
   });
 
   document.addEventListener("click", () => {
     menuDropdown.classList.add("hidden");
+    closeSortDropdown();
   });
 
   menuDropdown.addEventListener("click", (e) => {
@@ -1508,6 +1535,7 @@
   migratePracticeData();
   mergeSongsFromRepo().then(() => { renderLibrary(); });
   renderLibrary();
+  syncSortUI();
   updateSpeedLabel();
 
   // ── Service Worker ──
