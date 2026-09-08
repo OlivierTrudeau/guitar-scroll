@@ -375,6 +375,11 @@ html, body {
   white-space: pre;
 }
 
+.ug-import-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .ug-import {
   display: flex;
   gap: 8px;
@@ -385,7 +390,9 @@ html, body {
   min-width: 0;
 }
 .ug-import-btn {
+  position: relative;
   flex-shrink: 0;
+  min-width: 88px;
   background: var(--accent);
   color: #fff;
   border: none;
@@ -398,20 +405,65 @@ html, body {
   transition: opacity .15s;
 }
 .ug-import-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.7;
   cursor: wait;
 }
+.ug-import-btn.is-loading .ug-import-btn-label {
+  visibility: hidden;
+}
+.ug-import-btn-spinner {
+  display: none;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ug-spin 0.7s linear infinite;
+}
+.ug-import-btn.is-loading .ug-import-btn-spinner {
+  display: block;
+}
+@keyframes ug-spin {
+  to { transform: rotate(360deg); }
+}
+.ug-import-progress[hidden] {
+  display: none !important;
+}
+.ug-import-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.ug-import-progress-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: ug-progress 1.1s ease-in-out infinite;
+}
+@keyframes ug-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
 .ug-import-status {
-  margin: -4px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--text2);
   line-height: 1.35;
+  min-height: 1.2em;
 }
 .ug-import-status.is-error {
   color: #c45c5c;
 }
 .ug-import-status.is-ok {
   color: #3d8f6e;
+}
+.ug-import-status.is-progress {
+  color: var(--text2);
 }
 
 /* ── Player ── */

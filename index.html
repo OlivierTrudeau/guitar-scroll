@@ -77,11 +77,21 @@
         <button id="save-song-btn" class="icon-btn" aria-label="Save">✓</button>
       </header>
       <div class="edit-form">
-        <div class="ug-import">
-          <input id="ug-url-input" type="url" inputmode="url" placeholder="Paste Ultimate Guitar link…" autocomplete="off" spellcheck="false">
-          <button type="button" id="ug-import-btn" class="ug-import-btn">Import</button>
+        <div class="ug-import-wrap">
+          <div class="ug-import">
+            <input id="ug-url-input" type="url" inputmode="url" placeholder="Paste Ultimate Guitar link…" autocomplete="off" spellcheck="false">
+            <button type="button" id="ug-import-btn" class="ug-import-btn">
+              <span class="ug-import-btn-label">Import</span>
+              <span class="ug-import-btn-spinner" aria-hidden="true"></span>
+            </button>
+          </div>
+          <div id="ug-import-progress" class="ug-import-progress" hidden>
+            <div class="ug-import-progress-track">
+              <div class="ug-import-progress-fill"></div>
+            </div>
+          </div>
+          <p id="ug-import-status" class="ug-import-status" hidden></p>
         </div>
-        <p id="ug-import-status" class="ug-import-status" hidden></p>
         <input id="song-title-input" type="text" placeholder="Song title" autocomplete="off">
         <input id="song-artist-input" type="text" placeholder="Artist" autocomplete="off">
         <input id="song-capo-input" type="text" placeholder="Capo (e.g. 2nd fret)" autocomplete="off">

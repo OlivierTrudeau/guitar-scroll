@@ -23,6 +23,7 @@
   const ugUrlInput = $("#ug-url-input");
   const ugImportBtn = $("#ug-import-btn");
   const ugImportStatus = $("#ug-import-status");
+  const ugImportProgress = $("#ug-import-progress");
   const playerBackBtn = $("#player-back-btn");
   const playerSongTitle = $("#player-song-title");
   const playerSongArtist = $("#player-song-artist");
@@ -253,18 +254,47 @@
   // (CORS). We try free public proxies / readers, then parse title/artist/
   // capo/tuning/strum/body into the editor fields.
   const UG_URL_RE = /^https?:\/\/(?:tabs\.)?ultimate-guitar\.com\/tab\/.+/i;
+  let ugProgressTimer = null;
 
   function setUgStatus(msg, kind) {
     if (!msg) {
       ugImportStatus.hidden = true;
       ugImportStatus.textContent = "";
-      ugImportStatus.classList.remove("is-error", "is-ok");
+      ugImportStatus.classList.remove("is-error", "is-ok", "is-progress");
       return;
     }
     ugImportStatus.hidden = false;
     ugImportStatus.textContent = msg;
     ugImportStatus.classList.toggle("is-error", kind === "error");
     ugImportStatus.classList.toggle("is-ok", kind === "ok");
+    ugImportStatus.classList.toggle("is-progress", kind === "progress");
+  }
+
+  function setUgLoading(loading) {
+    ugImportBtn.disabled = loading;
+    ugImportBtn.classList.toggle("is-loading", loading);
+    ugImportBtn.setAttribute("aria-busy", loading ? "true" : "false");
+    if (ugImportProgress) ugImportProgress.hidden = !loading;
+    if (!loading && ugProgressTimer) {
+      clearInterval(ugProgressTimer);
+      ugProgressTimer = null;
+    }
+  }
+
+  function startUgProgress() {
+    setUgLoading(true);
+    const steps = [
+      "Fetching tab…",
+      "Reading chords & lyrics…",
+      "Extracting strumming pattern…",
+      "Almost done…",
+    ];
+    let i = 0;
+    setUgStatus(steps[0], "progress");
+    ugProgressTimer = setInterval(() => {
+      i = Math.min(i + 1, steps.length - 1);
+      setUgStatus(steps[i], "progress");
+    }, 2800);
   }
 
   function formatCapo(c) {
@@ -302,13 +332,121 @@
       decodeStrumCode(typeof m === "object" && m ? m.measure : m)
     );
     let text = strokes.join(" ").replace(/\s+/g, " ").trim();
-    // Collapse "D - D" style slightly for readability while keeping rests
-    text = text.replace(/ - /g, " - ");
     const part = (pat.part || "").trim();
     const bpm = pat.bpm;
     if (part) text = part + ": " + text;
     if (bpm) text += " (" + bpm + " bpm)";
     return text;
+  }
+
+  function strummingsFromTabView(tv) {
+    let list = Array.isArray(tv.strummings) ? tv.strummings.slice() : [];
+    if (list.length) return list;
+    const raw = tv.encode_strummings;
+    if (!raw) return [];
+    try {
+      const enc = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(enc.patterns) ? enc.patterns : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // UG strumming CSS-module class map (from their tab page bundle)
+  function strokeFromBeatClass(className) {
+    const c = String(className || "").split(/\s+/);
+    if (c.includes("djwky")) return "-"; // realPause
+    if (c.includes("l4MMU") || c.includes("Pp3D7")) return "X"; // mute / palm mute
+    if (c.includes("vaSS9")) return "U"; // up
+    if (c.includes("-u97C")) return "D"; // down
+    return "-";
+  }
+
+  function parseStrumFromRenderedHtml(htmlText) {
+    const sections = htmlText.match(/<section class="V2Y9h">[\s\S]*?<\/section>/g) || [];
+    if (!sections.length) return "";
+    const sec = sections[0];
+    const cells = [...sec.matchAll(/<div class="([^"]*)">/g)].map((m) => m[1]);
+    if (!cells.length) return "";
+    const strokes = cells.map(strokeFromBeatClass);
+    let text = strokes.join(" ").replace(/\s+/g, " ").trim();
+    const bpmMatch = htmlText.match(/(\d+)\s*bpm/i);
+    if (bpmMatch) text += " (" + bpmMatch[1] + " bpm)";
+    return text;
+  }
+
+  function stripHtmlToText(htmlChunk) {
+    let text = String(htmlChunk || "");
+    text = text.replace(/<br\s*\/?>/gi, "\n");
+    text = text.replace(/<\/(p|div|h[1-6]|tr|li)>/gi, "\n");
+    text = text.replace(/<[^>]+>/g, "");
+    return unescapeHtmlEntities(text).replace(/\u00a0/g, " ");
+  }
+
+  function parseUgRenderedHtml(htmlText) {
+    // Prefer structured js-store when present (raw HTML proxies)
+    if (htmlText.includes("js-store") && /data-content=/.test(htmlText)) {
+      try {
+        return parseUgJsStore(htmlText);
+      } catch {
+        // fall through to rendered DOM parse
+      }
+    }
+
+    let title = "";
+    let artist = "";
+    const og = htmlText.match(/og:title"\s+content="([^"]+)"/i);
+    let song = "";
+    if (og) {
+      song = unescapeHtmlEntities(og[1])
+        .replace(/\s*\((Chords|Tab|Bass|Ukulele)\)\s*$/i, "")
+        .trim();
+      const dash = song.indexOf(" - ");
+      if (dash > 0) {
+        artist = song.slice(0, dash).trim();
+        title = song.slice(dash + 3).trim();
+      } else {
+        title = song;
+      }
+    } else {
+      const rawTitle = ((htmlText.match(/<title>([^<]+)<\/title>/i) || [])[1] || "");
+      song = unescapeHtmlEntities(rawTitle)
+        .replace(/\s*@\s*Ultimate-Guitar\.Com.*$/i, "")
+        .trim();
+      const by = song.match(/^(.+?)\s+CHORDS?\s+by\s+(.+)$/i);
+      if (by) {
+        title = by[1].trim();
+        artist = by[2].trim();
+      } else {
+        title = song.replace(/\s*\((Chords|Tab|Bass|Ukulele)\)\s*$/i, "").trim();
+      }
+    }
+
+    let capo = "";
+    const capoMatch =
+      htmlText.match(/id="capo"[^>]*>([^<]+)</i) ||
+      htmlText.match(/Capo:\s*<\/[^>]+>\s*<[^>]+>(?:<[^>]+>)?([^<]+)/i);
+    if (capoMatch) capo = unescapeHtmlEntities(capoMatch[1]).trim();
+
+    let tuning = "";
+    const tunMatch =
+      htmlText.match(/id="tuning"[^>]*>([^<]+)</i) ||
+      htmlText.match(/Tuning:\s*<\/[^>]+>\s*<[^>]+>(?:<[^>]+>)?([^<]+)/i);
+    if (tunMatch) tuning = unescapeHtmlEntities(tunMatch[1]).trim();
+
+    let body = "";
+    const preMatch = htmlText.match(/<pre class="[^"]*"[^>]*>([\s\S]*?)<\/pre>/i);
+    if (preMatch) body = cleanUgBody(stripHtmlToText(preMatch[1]));
+    if (!body) throw new Error("Could not extract chords/lyrics from that page.");
+
+    return {
+      title: title || "Untitled",
+      artist,
+      capo,
+      tuning,
+      strum: parseStrumFromRenderedHtml(htmlText),
+      body,
+    };
   }
 
   function cleanUgBody(body) {
@@ -342,12 +480,14 @@
       throw new Error("No free chord sheet on that link (official/pro tabs aren't supported).");
     }
     const tuning = meta.tuning || {};
+    // Prefer rendered-class decode when available in same HTML; else packed measures
+    const renderedStrum = parseStrumFromRenderedHtml(htmlText);
     return {
       title: tab.song_name || "",
       artist: tab.artist_name || "",
       capo: formatCapo(meta.capo),
       tuning: tuning.value || tuning.name || "",
-      strum: formatStrumming(tv.strummings || []),
+      strum: renderedStrum || formatStrumming(strummingsFromTabView(tv)),
       body: cleanUgBody(content),
     };
   }
@@ -418,45 +558,71 @@
     }
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Jina HTML: reliable CORS + rendered strumming pattern classes + chord sheet
+  async function fetchSongFromJinaHtml(url) {
+    const raw = await fetchText("https://r.jina.ai/" + url, {
+      timeout: 40000,
+      headers: {
+        Accept: "text/html",
+        "X-Return-Format": "html",
+      },
+    });
+    return parseUgRenderedHtml(raw);
+  }
+
+  async function fetchSongFromJinaMarkdown(url) {
+    const raw = await fetchText("https://r.jina.ai/" + url, {
+      timeout: 35000,
+      headers: { Accept: "application/json" },
+    });
+    const payload = JSON.parse(raw);
+    const data = payload.data || payload;
+    if (!data.content) throw new Error("Empty reader response");
+    return parseUgMarkdown(data.title || "", data.content);
+  }
+
+  // allorigins sometimes has raw js-store (incl. strumming), but is flaky/CORS-fragile
+  async function fetchSongFromAllOrigins(url) {
+    const encoded = encodeURIComponent(url);
+    const endpoints = [
+      "https://api.allorigins.win/get?url=" + encoded,
+      "https://api.allorigins.win/raw?url=" + encoded,
+    ];
+    let lastErr = null;
+    for (const endpoint of endpoints) {
+      try {
+        const text = await fetchText(endpoint, { timeout: 20000 });
+        let htmlText = text;
+        if (endpoint.includes("/get?")) {
+          const payload = JSON.parse(text);
+          htmlText = payload.contents || "";
+        }
+        if (htmlText && htmlText.includes("js-store")) {
+          return parseUgJsStore(htmlText);
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("Could not load tab HTML");
+  }
+
   async function importFromUltimateGuitar(rawUrl) {
     const url = String(rawUrl || "").trim();
     if (!UG_URL_RE.test(url)) {
       throw new Error("Paste a full Ultimate Guitar tab link (tabs.ultimate-guitar.com/tab/…).");
     }
 
-    const encoded = encodeURIComponent(url);
-
-    // Raw HTML via CORS proxies → best fidelity (incl. strumming)
-    const htmlAttempt = (async () => {
-      const proxies = [
-        "https://api.allorigins.win/raw?url=" + encoded,
-        "https://api.codetabs.com/v1/proxy?quest=" + encoded,
-      ];
-      let lastErr = null;
-      for (const proxy of proxies) {
-        try {
-          const htmlText = await fetchText(proxy, { timeout: 16000 });
-          if (htmlText && htmlText.includes("js-store")) {
-            return parseUgJsStore(htmlText);
-          }
-        } catch (err) {
-          lastErr = err;
-        }
-      }
-      throw lastErr || new Error("HTML proxy had no tab data");
-    })();
-
-    // Jina reader → reliable CORS for title/artist/capo/tuning/body
-    const readerAttempt = (async () => {
-      const raw = await fetchText("https://r.jina.ai/" + url, {
-        timeout: 35000,
-        headers: { Accept: "application/json" },
-      });
-      const payload = JSON.parse(raw);
-      const data = payload.data || payload;
-      if (!data.content) throw new Error("Empty reader response");
-      return parseUgMarkdown(data.title || "", data.content);
-    })();
+    // Primary: Jina HTML (CORS-friendly, includes strumming UI classes)
+    // Fallback: Jina markdown (body/meta only)
+    // Optional: allorigins js-store if it happens to work
+    const htmlAttempt = fetchSongFromJinaHtml(url);
+    const mdAttempt = fetchSongFromJinaMarkdown(url);
+    const aoAttempt = fetchSongFromAllOrigins(url);
 
     const wrap = (promise, src) =>
       promise.then(
@@ -465,27 +631,37 @@
       );
 
     const htmlWrapped = wrap(htmlAttempt, "html");
-    const readerWrapped = wrap(readerAttempt, "reader");
+    const mdWrapped = wrap(mdAttempt, "md");
+    const aoWrapped = wrap(aoAttempt, "ao");
 
-    const first = await Promise.race([htmlWrapped, readerWrapped]);
-    if (first.song) {
-      if (first.src === "html") return first.song;
-      // Reader finished first — wait briefly for HTML (better strumming)
-      const late = await Promise.race([
-        htmlWrapped,
-        new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
-      ]);
-      if (late && late.song) return late.song;
-      return first.song;
-    }
+    // Prefer first success that includes strumming; otherwise first success with body
+    const results = [];
+    const pushResult = (r) => {
+      if (r && r.song && r.song.body) results.push(r);
+    };
 
-    const second = first.src === "html" ? await readerWrapped : await htmlWrapped;
-    if (second.song) return second.song;
+    const first = await Promise.race([htmlWrapped, mdWrapped, aoWrapped]);
+    pushResult(first);
+
+    if (first.song && first.song.strum) return first.song;
+
+    // Wait a bit for a strumming-capable result
+    setUgStatus("Extracting strumming pattern…", "progress");
+    const rest = await Promise.all([
+      first.src === "html" ? Promise.resolve(first) : htmlWrapped,
+      first.src === "md" ? Promise.resolve(first) : mdWrapped,
+      first.src === "ao" ? Promise.resolve(first) : aoWrapped,
+    ]);
+    rest.forEach(pushResult);
+
+    const withStrum = results.find((r) => r.song && r.song.strum);
+    if (withStrum) return withStrum.song;
+    if (results.length) return results[0].song;
 
     const errMsg =
-      (first.err && first.err.message) ||
-      (second.err && second.err.message) ||
-      "";
+      [first, ...rest]
+        .map((r) => r && r.err && r.err.message)
+        .filter(Boolean)[0] || "";
     throw new Error(
       "Couldn't fetch that tab (network/proxy). Try again, or paste the chords manually." +
         (errMsg ? " (" + errMsg + ")" : "")
@@ -508,8 +684,7 @@
       ugUrlInput.focus();
       return;
     }
-    ugImportBtn.disabled = true;
-    setUgStatus("Importing…", null);
+    startUgProgress();
     try {
       const song = await importFromUltimateGuitar(url);
       applyImportedSong(song);
@@ -522,12 +697,13 @@
         window.Analytics.track("ug-import", {
           title: song.title || "",
           artist: song.artist || "",
+          has_strum: Boolean(song.strum),
         });
       }
     } catch (err) {
       setUgStatus(err.message || "Import failed.", "error");
     } finally {
-      ugImportBtn.disabled = false;
+      setUgLoading(false);
     }
   }
 
@@ -545,6 +721,7 @@
     editingProficiency = song ? (song.proficiency || 0) : 0;
     updateEditorStars();
     ugUrlInput.value = "";
+    setUgLoading(false);
     setUgStatus("", null);
     showView(editView);
     if (song) titleInput.focus();
