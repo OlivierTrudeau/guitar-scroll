@@ -425,43 +425,70 @@
     }
 
     const encoded = encodeURIComponent(url);
-    const errors = [];
 
-    // 1) Raw HTML via public CORS proxies → best fidelity (incl. strumming)
-    const htmlProxies = [
-      "https://api.allorigins.win/raw?url=" + encoded,
-      "https://api.codetabs.com/v1/proxy?quest=" + encoded,
-    ];
-    for (const proxy of htmlProxies) {
-      try {
-        const htmlText = await fetchText(proxy, { timeout: 20000 });
-        if (htmlText && htmlText.includes("js-store")) {
-          return parseUgJsStore(htmlText);
+    // Raw HTML via CORS proxies → best fidelity (incl. strumming)
+    const htmlAttempt = (async () => {
+      const proxies = [
+        "https://api.allorigins.win/raw?url=" + encoded,
+        "https://api.codetabs.com/v1/proxy?quest=" + encoded,
+      ];
+      let lastErr = null;
+      for (const proxy of proxies) {
+        try {
+          const htmlText = await fetchText(proxy, { timeout: 16000 });
+          if (htmlText && htmlText.includes("js-store")) {
+            return parseUgJsStore(htmlText);
+          }
+        } catch (err) {
+          lastErr = err;
         }
-      } catch (err) {
-        errors.push(String(err && err.message ? err.message : err));
       }
-    }
+      throw lastErr || new Error("HTML proxy had no tab data");
+    })();
 
-    // 2) Jina reader (reliable CORS) → title/artist/capo/tuning/body
-    try {
+    // Jina reader → reliable CORS for title/artist/capo/tuning/body
+    const readerAttempt = (async () => {
       const raw = await fetchText("https://r.jina.ai/" + url, {
         timeout: 35000,
         headers: { Accept: "application/json" },
       });
       const payload = JSON.parse(raw);
       const data = payload.data || payload;
-      const mdTitle = data.title || "";
-      const mdContent = data.content || "";
-      if (!mdContent) throw new Error("Empty reader response");
-      return parseUgMarkdown(mdTitle, mdContent);
-    } catch (err) {
-      errors.push(String(err && err.message ? err.message : err));
+      if (!data.content) throw new Error("Empty reader response");
+      return parseUgMarkdown(data.title || "", data.content);
+    })();
+
+    const wrap = (promise, src) =>
+      promise.then(
+        (song) => ({ src, song }),
+        (err) => ({ src, err })
+      );
+
+    const htmlWrapped = wrap(htmlAttempt, "html");
+    const readerWrapped = wrap(readerAttempt, "reader");
+
+    const first = await Promise.race([htmlWrapped, readerWrapped]);
+    if (first.song) {
+      if (first.src === "html") return first.song;
+      // Reader finished first — wait briefly for HTML (better strumming)
+      const late = await Promise.race([
+        htmlWrapped,
+        new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+      ]);
+      if (late && late.song) return late.song;
+      return first.song;
     }
 
+    const second = first.src === "html" ? await readerWrapped : await htmlWrapped;
+    if (second.song) return second.song;
+
+    const errMsg =
+      (first.err && first.err.message) ||
+      (second.err && second.err.message) ||
+      "";
     throw new Error(
-      "Couldn't fetch that tab (network/proxy). Try again, or paste the chords manually. " +
-        (errors[0] ? "(" + errors[0] + ")" : "")
+      "Couldn't fetch that tab (network/proxy). Try again, or paste the chords manually." +
+        (errMsg ? " (" + errMsg + ")" : "")
     );
   }
 
