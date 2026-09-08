@@ -375,6 +375,45 @@ html, body {
   white-space: pre;
 }
 
+.ug-import {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.ug-import input {
+  flex: 1;
+  min-width: 0;
+}
+.ug-import-btn {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.ug-import-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.ug-import-status {
+  margin: -4px 0 0;
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.35;
+}
+.ug-import-status.is-error {
+  color: #c45c5c;
+}
+.ug-import-status.is-ok {
+  color: #3d8f6e;
+}
+
 /* ── Player ── */
 .player-bar { gap: 8px; }
 .player-title-wrap {

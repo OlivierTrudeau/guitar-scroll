@@ -77,6 +77,11 @@
         <button id="save-song-btn" class="icon-btn" aria-label="Save">✓</button>
       </header>
       <div class="edit-form">
+        <div class="ug-import">
+          <input id="ug-url-input" type="url" inputmode="url" placeholder="Paste Ultimate Guitar link…" autocomplete="off" spellcheck="false">
+          <button type="button" id="ug-import-btn" class="ug-import-btn">Import</button>
+        </div>
+        <p id="ug-import-status" class="ug-import-status" hidden></p>
         <input id="song-title-input" type="text" placeholder="Song title" autocomplete="off">
         <input id="song-artist-input" type="text" placeholder="Artist" autocomplete="off">
         <input id="song-capo-input" type="text" placeholder="Capo (e.g. 2nd fret)" autocomplete="off">
@@ -93,7 +98,7 @@
           </div>
           <span id="proficiency-label" class="proficiency-label">Not rated</span>
         </div>
-        <textarea id="song-body-input" placeholder="Paste chords & lyrics here...&#10;&#10;Supports formats like:&#10;&#10;[Verse 1]&#10;C              Am&#10;Heart on my sleeve&#10;&#10;Or inline: [C]Heart on my [Am]sleeve"></textarea>
+        <textarea id="song-body-input" placeholder="Paste chords & lyrics here — or import from an Ultimate Guitar link above.&#10;&#10;Supports formats like:&#10;&#10;[Verse 1]&#10;C              Am&#10;Heart on my sleeve&#10;&#10;Or inline: [C]Heart on my [Am]sleeve"></textarea>
       </div>
     </div>
 

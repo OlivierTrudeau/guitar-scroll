@@ -20,6 +20,9 @@
   const tuningInput = $("#song-tuning-input");
   const strumInput = $("#song-strum-input");
   const bodyInput = $("#song-body-input");
+  const ugUrlInput = $("#ug-url-input");
+  const ugImportBtn = $("#ug-import-btn");
+  const ugImportStatus = $("#ug-import-status");
   const playerBackBtn = $("#player-back-btn");
   const playerSongTitle = $("#player-song-title");
   const playerSongArtist = $("#player-song-artist");
@@ -245,6 +248,258 @@
     updateEditorStars();
   });
 
+  // ── Ultimate Guitar import ──
+  // The app is static (GitHub Pages), so the browser can't fetch UG directly
+  // (CORS). We try free public proxies / readers, then parse title/artist/
+  // capo/tuning/strum/body into the editor fields.
+  const UG_URL_RE = /^https?:\/\/(?:tabs\.)?ultimate-guitar\.com\/tab\/.+/i;
+
+  function setUgStatus(msg, kind) {
+    if (!msg) {
+      ugImportStatus.hidden = true;
+      ugImportStatus.textContent = "";
+      ugImportStatus.classList.remove("is-error", "is-ok");
+      return;
+    }
+    ugImportStatus.hidden = false;
+    ugImportStatus.textContent = msg;
+    ugImportStatus.classList.toggle("is-error", kind === "error");
+    ugImportStatus.classList.toggle("is-ok", kind === "ok");
+  }
+
+  function formatCapo(c) {
+    if (c === null || c === undefined || c === "" || c === 0 || c === "0") {
+      return "No capo";
+    }
+    const n = parseInt(c, 10);
+    if (Number.isNaN(n)) return String(c);
+    const mod = n % 100;
+    let suf = "th";
+    if (mod < 11 || mod > 13) {
+      suf = { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
+    }
+    return n + suf + " fret";
+  }
+
+  function decodeStrumCode(code) {
+    const n = parseInt(code, 10);
+    if (Number.isNaN(n)) return "?";
+    // UG packs stroke type in the low digits; 2xx ≈ rest / empty slot
+    const hundreds = Math.floor(n / 100);
+    const kind = n % 100;
+    if (hundreds === 2) return "-";
+    if (kind === 1) return "D";
+    if (kind === 2) return "U";
+    if (kind === 3) return "X";
+    return "?";
+  }
+
+  function formatStrumming(strummings) {
+    if (!Array.isArray(strummings) || !strummings.length) return "";
+    const pat = strummings[0];
+    const measures = pat.measures || [];
+    const strokes = measures.map((m) =>
+      decodeStrumCode(typeof m === "object" && m ? m.measure : m)
+    );
+    let text = strokes.join(" ").replace(/\s+/g, " ").trim();
+    // Collapse "D - D" style slightly for readability while keeping rests
+    text = text.replace(/ - /g, " - ");
+    const part = (pat.part || "").trim();
+    const bpm = pat.bpm;
+    if (part) text = part + ": " + text;
+    if (bpm) text += " (" + bpm + " bpm)";
+    return text;
+  }
+
+  function cleanUgBody(body) {
+    return String(body || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/\[\/?tab\]/gi, "")
+      .replace(/\[ch\](.*?)\[\/ch\]/gi, "$1")
+      .trim();
+  }
+
+  function unescapeHtmlEntities(str) {
+    const el = document.createElement("textarea");
+    el.innerHTML = str;
+    return el.value;
+  }
+
+  function parseUgJsStore(htmlText) {
+    const match =
+      htmlText.match(/<div[^>]*class="[^"]*js-store[^"]*"[^>]*data-content="([^"]+)"/i) ||
+      htmlText.match(/data-content='([^']+)'/i);
+    if (!match) throw new Error("Could not find tab data on that page.");
+    const data = JSON.parse(unescapeHtmlEntities(match[1]));
+    const page = data && data.store && data.store.page && data.store.page.data;
+    if (!page || !page.tab) throw new Error("Unexpected Ultimate Guitar page format.");
+    const tab = page.tab;
+    const tv = page.tab_view || {};
+    const meta = tv.meta || {};
+    const content = (tv.wiki_tab && tv.wiki_tab.content) || "";
+    if (!String(content).trim()) {
+      throw new Error("No free chord sheet on that link (official/pro tabs aren't supported).");
+    }
+    const tuning = meta.tuning || {};
+    return {
+      title: tab.song_name || "",
+      artist: tab.artist_name || "",
+      capo: formatCapo(meta.capo),
+      tuning: tuning.value || tuning.name || "",
+      strum: formatStrumming(tv.strummings || []),
+      body: cleanUgBody(content),
+    };
+  }
+
+  function parseUgMarkdown(title, content) {
+    let artist = "";
+    let song = title || "";
+    song = song.replace(/\s*\((Chords|Tab|Bass|Ukulele)\)\s*$/i, "").trim();
+    const dash = song.indexOf(" - ");
+    if (dash > 0) {
+      artist = song.slice(0, dash).trim();
+      song = song.slice(dash + 3).trim();
+    }
+    let capo = "";
+    let tuning = "";
+    const capoMatch = content.match(/\|\s*Capo:\s*\|\s*([^|\n]+)/i);
+    if (capoMatch) capo = capoMatch[1].trim();
+    const tunMatch = content.match(/\|\s*Tuning:\s*\|\s*(?:\[([^\]]+)\]|([^|\n]+))/i);
+    if (tunMatch) tuning = (tunMatch[1] || tunMatch[2] || "").trim();
+
+    let body = "";
+    const fence = content.match(/```[^\n]*\n([\s\S]*?)```/);
+    if (fence) {
+      body = fence[1].trim();
+    } else {
+      const markers = ["[Intro]", "[Verse", "[Chorus]", "[Bridge]", "whole song"];
+      let idx = -1;
+      for (const marker of markers) {
+        if (marker === "[Verse") {
+          const m = content.match(/\[Verse[^\]]*\]/);
+          if (m) idx = m.index;
+        } else {
+          idx = content.indexOf(marker);
+        }
+        if (idx >= 0) break;
+      }
+      if (idx >= 0) {
+        body = content.slice(idx).trim();
+        for (const stop of ["\nLast update:", "\nRating", "\nPlay next", "\nRelated tabs", "\n© "]) {
+          const s = body.indexOf(stop);
+          if (s >= 0) body = body.slice(0, s).trim();
+        }
+      }
+    }
+    if (!body) throw new Error("Could not extract chords/lyrics from that page.");
+    return {
+      title: song,
+      artist,
+      capo,
+      tuning,
+      strum: "",
+      body: cleanUgBody(body),
+    };
+  }
+
+  async function fetchText(url, opts) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), (opts && opts.timeout) || 25000);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: (opts && opts.headers) || {},
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function importFromUltimateGuitar(rawUrl) {
+    const url = String(rawUrl || "").trim();
+    if (!UG_URL_RE.test(url)) {
+      throw new Error("Paste a full Ultimate Guitar tab link (tabs.ultimate-guitar.com/tab/…).");
+    }
+
+    const encoded = encodeURIComponent(url);
+    const errors = [];
+
+    // 1) Raw HTML via public CORS proxies → best fidelity (incl. strumming)
+    const htmlProxies = [
+      "https://api.allorigins.win/raw?url=" + encoded,
+      "https://api.codetabs.com/v1/proxy?quest=" + encoded,
+    ];
+    for (const proxy of htmlProxies) {
+      try {
+        const htmlText = await fetchText(proxy, { timeout: 20000 });
+        if (htmlText && htmlText.includes("js-store")) {
+          return parseUgJsStore(htmlText);
+        }
+      } catch (err) {
+        errors.push(String(err && err.message ? err.message : err));
+      }
+    }
+
+    // 2) Jina reader (reliable CORS) → title/artist/capo/tuning/body
+    try {
+      const raw = await fetchText("https://r.jina.ai/" + url, {
+        timeout: 35000,
+        headers: { Accept: "application/json" },
+      });
+      const payload = JSON.parse(raw);
+      const data = payload.data || payload;
+      const mdTitle = data.title || "";
+      const mdContent = data.content || "";
+      if (!mdContent) throw new Error("Empty reader response");
+      return parseUgMarkdown(mdTitle, mdContent);
+    } catch (err) {
+      errors.push(String(err && err.message ? err.message : err));
+    }
+
+    throw new Error(
+      "Couldn't fetch that tab (network/proxy). Try again, or paste the chords manually. " +
+        (errors[0] ? "(" + errors[0] + ")" : "")
+    );
+  }
+
+  function applyImportedSong(song) {
+    if (song.title) titleInput.value = song.title;
+    if (song.artist) artistInput.value = song.artist;
+    if (song.capo) capoInput.value = song.capo;
+    if (song.tuning) tuningInput.value = song.tuning;
+    if (song.strum) strumInput.value = song.strum;
+    if (song.body) bodyInput.value = song.body;
+  }
+
+  async function handleUgImport() {
+    const url = ugUrlInput.value.trim();
+    if (!url) {
+      setUgStatus("Paste an Ultimate Guitar link first.", "error");
+      ugUrlInput.focus();
+      return;
+    }
+    ugImportBtn.disabled = true;
+    setUgStatus("Importing…", null);
+    try {
+      const song = await importFromUltimateGuitar(url);
+      applyImportedSong(song);
+      setUgStatus("Imported — check the fields, then tap ✓ to save.", "ok");
+      if (window.Analytics) {
+        window.Analytics.track("ug-import", {
+          title: song.title || "",
+          artist: song.artist || "",
+        });
+      }
+    } catch (err) {
+      setUgStatus(err.message || "Import failed.", "error");
+    } finally {
+      ugImportBtn.disabled = false;
+    }
+  }
+
   // ── Edit ──
   function openEditor(id) {
     editingId = id;
@@ -258,8 +513,11 @@
     bodyInput.value = song ? song.body : "";
     editingProficiency = song ? (song.proficiency || 0) : 0;
     updateEditorStars();
+    ugUrlInput.value = "";
+    setUgStatus("", null);
     showView(editView);
-    titleInput.focus();
+    if (song) titleInput.focus();
+    else ugUrlInput.focus();
   }
 
   function saveSong() {
@@ -943,6 +1201,13 @@
   addSongBtn.addEventListener("click", () => openEditor(null));
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
+  ugImportBtn.addEventListener("click", handleUgImport);
+  ugUrlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleUgImport();
+    }
+  });
   playerBackBtn.addEventListener("click", () => { showView(libraryView); stopScroll(); });
   editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
   statsCurrentBtn.addEventListener("click", () => openStats(currentSongId));

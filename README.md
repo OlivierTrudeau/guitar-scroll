@@ -5,12 +5,27 @@ https://oliviertrudeau.github.io/guitar-scroll/
 
 ## Add a song
 
+### In the app (easiest)
+
+1. Tap **＋**
+2. Paste an Ultimate Guitar link, e.g.
+   `https://tabs.ultimate-guitar.com/tab/eminem/temporary-chords-5347992`
+3. Tap **Import** — title, artist, capo, tuning, strumming, and chords/lyrics fill in
+4. Tap **✓** to save
+
+Works for free/public chord sheets. Official/pro tabs won't have extractable content.
+Import uses a public page reader/proxy (the browser can't call Ultimate Guitar directly).
+
+### From the CLI
+
 ```bash
 cd ~/Desktop/Personnel/Songs/app
+python3 add_song.py --url 'https://tabs.ultimate-guitar.com/tab/artist/song-chords-123' --no-push
+# or paste tab text interactively:
 python3 add_song.py
 ```
 
-Paste the tab content from Ultimate Guitar, press Enter, then Ctrl+D.
+Paste mode: copy the tab from Ultimate Guitar, run the script, paste, then Ctrl+D.
 
 ## Run locally
 
@@ -65,6 +80,7 @@ only send events, not read your data.
   - `autoscroll-start` — someone played along (includes song + speed)
   - `song-practiced` — a song was practiced (scrolled past the ~5s threshold)
   - `song-add` — someone added their own song (includes library size)
+  - `ug-import` — someone imported a song from an Ultimate Guitar link
 - **Retention** (left sidebar → Retention): the real "user stories" view — e.g.
   "of the people who used it this week, how many came back next week." This is
   what tells daily users apart from people who drifted away after a month.
