@@ -24,6 +24,7 @@
   const playerSongTitle = $("#player-song-title");
   const playerSongArtist = $("#player-song-artist");
   const editCurrentBtn = $("#edit-current-btn");
+  const statsCurrentBtn = $("#stats-current-btn");
   const songMeta = $("#song-meta");
   const songContent = $("#song-content");
   const scrollToggle = $("#scroll-toggle");
@@ -36,9 +37,31 @@
   const proficiencyLabel = $("#proficiency-label");
   const menuBtn = $("#menu-btn");
   const menuDropdown = $("#menu-dropdown");
+  const tunerBtn = $("#tuner-btn");
+  const tunerView = $("#tuner-view");
+  const tunerBackBtn = $("#tuner-back-btn");
+  const tunerToggle = $("#tuner-toggle");
+  const tunerNote = $("#tuner-note");
+  const tunerFreq = $("#tuner-freq");
+  const tunerNeedle = $("#tuner-needle");
+  const tunerStatus = $("#tuner-status");
+  const tunerMsg = $("#tuner-msg");
+  const tunerStringsEl = $(".tuner-strings");
   const exportBtn = $("#export-btn");
   const importBtn = $("#import-btn");
   const importFile = $("#import-file");
+  // Streak banner (library) + stats view refs
+  const streakCountEl = $("#streak-count");
+  const todayCountEl = $("#today-count");
+  const totalCountEl = $("#total-count");
+  const statsView = $("#stats-view");
+  const statsBackBtn = $("#stats-back-btn");
+  const statsSongTitle = $("#stats-song-title");
+  const statsSongArtist = $("#stats-song-artist");
+  const statsTotalEl = $("#stats-total");
+  const statsStreakEl = $("#stats-streak");
+  const statsLastEl = $("#stats-last");
+  const statsCalendarEl = $("#stats-calendar");
 
   let songs = [];
   let editingId = null;
@@ -46,6 +69,11 @@
   let scrolling = false;
   let speed = 10;
   let scrollRAF = null;
+  let playedTimer = null;
+  // A song counts as "played" only after the auto-scroller runs uninterrupted for this long
+  const PLAYED_THRESHOLD_MS = 5000;
+  // Songs not played within this window are flagged as "rusty" (may need practice)
+  const RUSTY_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
   let editingProficiency = 0;
   let activeFilterLevel = "all";
   let searchQuery = "";
@@ -60,6 +88,26 @@
   }
   function saveSongs() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(songs));
+  }
+
+  // Backfill practice fields for songs created before this feature existed, so the
+  // counter/calendar have consistent data to read from
+  function migratePracticeData() {
+    let changed = false;
+    for (const s of songs) {
+      // Give every song a practice log array
+      if (!Array.isArray(s.practiceLog)) {
+        // Seed the log with the one known play so history isn't lost
+        s.practiceLog = s.lastPlayed ? [s.lastPlayed] : [];
+        changed = true;
+      }
+      // Derive the count from the log if it's missing
+      if (typeof s.practiceCount !== "number") {
+        s.practiceCount = s.practiceLog.length;
+        changed = true;
+      }
+    }
+    if (changed) saveSongs();
   }
 
   function mergeSongsFromRepo() {
@@ -81,9 +129,11 @@
 
   // ── Views ──
   function showView(view) {
-    [libraryView, editView, playerView].forEach((v) => v.classList.remove("active"));
+    [libraryView, editView, playerView, statsView, tunerView].forEach((v) => v.classList.remove("active"));
     view.classList.add("active");
     stopScroll();
+    // Leaving the tuner view should always release the mic
+    if (view !== tunerView) stopTuner();
   }
 
   // ── Library ──
@@ -138,6 +188,10 @@
           <div class="song-item-title">${esc(song.title || "Untitled")}</div>
           <div class="song-item-artist">${esc(song.artist || "")}</div>
           <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
+          <div class="song-item-meta-row">
+            ${lastPlayedBadge(song.lastPlayed)}
+            ${practiceCountBadge(song.practiceCount)}
+          </div>
         </div>
         <button class="song-item-delete" data-id="${song.id}" aria-label="Delete">✕</button>`;
       el.querySelector(".song-item-info").addEventListener("click", () => openPlayer(song.id));
@@ -216,6 +270,10 @@
         proficiency: editingProficiency,
         body,
       });
+      // Track new-song creation — a strong sign someone has adopted the app
+      if (window.Analytics) {
+        window.Analytics.track("song-add", { library_size: songs.length });
+      }
     }
     saveSongs();
     renderLibrary();
@@ -343,6 +401,8 @@
     songMeta.innerHTML = "";
     if (song.tuning) songMeta.innerHTML += `<span class="meta-tag"><strong>Tuning:</strong> ${esc(song.tuning)}</span>`;
     if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo:</strong> ${esc(song.capo)}</span>`;
+    const rusty = isRusty(song.lastPlayed);
+    songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
 
     let contentHTML = "";
     if (song.strum) {
@@ -354,13 +414,67 @@
     songContent.scrollTop = 0;
 
     showView(playerView);
+
+    // Track that a song was actually opened — key signal of real usage
+    if (window.Analytics) {
+      window.Analytics.track("song-open", {
+        song_title: song.title,
+        artist: song.artist || "",
+        proficiency: song.proficiency || 0,
+      });
+    }
   }
 
   // ── Auto-scroll ──
+  // Records the current song as played; called once the scroller runs past the threshold
+  function markPlayed(id) {
+    const song = songs.find((s) => s.id === id);
+    if (!song) return;
+    const now = Date.now();
+    song.lastPlayed = now;
+
+    // Ensure the practice log exists (older songs won't have it)
+    if (!Array.isArray(song.practiceLog)) song.practiceLog = [];
+
+    // Only count one practice session per calendar day per song — avoids inflating
+    // the counter if the user replays the same song several times in one sitting
+    const alreadyToday = song.practiceLog.some((ts) => isSameDay(ts, now));
+    if (!alreadyToday) {
+      song.practiceLog.push(now);
+      song.practiceCount = (song.practiceCount || 0) + 1;
+    }
+
+    saveSongs();
+    // Refresh the "last played" line in the player if this song is open
+    if (currentSongId === id) {
+      renderLastPlayedMeta(song);
+    }
+    renderLibrary();
+    renderStreakBanner();
+    if (window.Analytics) window.Analytics.track("song-practiced");
+  }
+
   function startScroll() {
     scrolling = true;
     scrollToggle.textContent = "❚❚";
     scrollToggle.classList.add("active");
+
+    // Track autoscroll starts — shows people are playing along, not just browsing
+    if (window.Analytics) {
+      const current = songs.find((s) => s.id === currentSongId);
+      window.Analytics.track("autoscroll-start", {
+        song_title: current ? current.title : "",
+        speed: speed,
+      });
+    }
+    // Mark as played only after sustained scrolling — a quick tap shouldn't count
+    if (currentSongId && !playedTimer) {
+      const id = currentSongId;
+      playedTimer = setTimeout(() => {
+        playedTimer = null;
+        markPlayed(id);
+      }, PLAYED_THRESHOLD_MS);
+    }
     let last = performance.now();
     let accum = 0;
 
@@ -389,6 +503,8 @@
     scrollToggle.textContent = "▶";
     scrollToggle.classList.remove("active");
     if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+    // Scrolling stopped before the threshold — cancel the pending "played" mark
+    if (playedTimer) { clearTimeout(playedTimer); playedTimer = null; }
   }
 
   function updateSpeedLabel() {
@@ -438,15 +554,386 @@
     return d.innerHTML;
   }
 
+  // Local-midnight timestamp for a given date — the canonical "day" key for practice logs
+  function startOfDay(ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  // True when two timestamps fall on the same calendar day (local time)
+  function isSameDay(a, b) {
+    return startOfDay(a) === startOfDay(b);
+  }
+
+  // Collapses every song's practice log into a Set of distinct day-keys the user practiced
+  function practicedDaySet() {
+    const days = new Set();
+    for (const s of songs) {
+      if (!Array.isArray(s.practiceLog)) continue;
+      for (const ts of s.practiceLog) days.add(startOfDay(ts));
+    }
+    return days;
+  }
+
+  // Counts consecutive days (ending today or yesterday) with at least one practice session.
+  // Passing a specific song's day-set gives a per-song streak; omit for the global streak.
+  function computeStreak(daySet) {
+    const oneDay = 24 * 60 * 60 * 1000;
+    let cursor = startOfDay(Date.now());
+
+    // Streak stays alive if practiced today OR yesterday; otherwise it's broken
+    if (!daySet.has(cursor)) {
+      cursor -= oneDay;
+      if (!daySet.has(cursor)) return 0;
+    }
+
+    // Walk backwards day-by-day until we hit a gap
+    let streak = 0;
+    while (daySet.has(cursor)) {
+      streak++;
+      cursor -= oneDay;
+    }
+    return streak;
+  }
+
+  // A song is "rusty" if it has been played before but not recently (may need practice)
+  function isRusty(ts) {
+    if (!ts) return false;
+    return Date.now() - ts > RUSTY_THRESHOLD_MS;
+  }
+
+  // Human-friendly relative time, e.g. "Today", "3 days ago", "2 months ago"
+  function formatLastPlayed(ts) {
+    if (!ts) return "Never";
+    const diff = Date.now() - ts;
+    const day = 24 * 60 * 60 * 1000;
+    const days = Math.floor(diff / day);
+
+    // Same day
+    if (days <= 0) return "Today";
+    // Yesterday
+    if (days === 1) return "Yesterday";
+    // Within the last few weeks — show days
+    if (days < 30) return `${days} days ago`;
+    // A month or more — show months
+    const months = Math.floor(days / 30);
+    if (months < 12) return months === 1 ? "1 month ago" : `${months} months ago`;
+    // A year or more — show years
+    const years = Math.floor(days / 365);
+    return years === 1 ? "1 year ago" : `${years} years ago`;
+  }
+
+  // Small badge for the library list; flags rusty songs so forgotten ones stand out
+  function lastPlayedBadge(ts) {
+    const rusty = isRusty(ts);
+    const cls = "song-item-lastplayed" + (rusty ? " rusty" : "") + (!ts ? " never" : "");
+    const icon = rusty ? "⏳ " : "";
+    return `<div class="${cls}">${icon}${esc(formatLastPlayed(ts))}</div>`;
+  }
+
+  // Re-renders just the "last played" meta tag in the open player (after a play is recorded)
+  function renderLastPlayedMeta(song) {    const existing = songMeta.querySelector(".meta-tag.last-played");
+    const rusty = isRusty(song.lastPlayed);
+    const html = `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
+    // Replace the existing tag in place if present
+    if (existing) {
+      existing.outerHTML = html;
+    // Otherwise append it (e.g. first play in this session)
+    } else {
+      songMeta.innerHTML += html;
+    }
+  }
+
+  // Small "times practiced" badge for the library list
+  function practiceCountBadge(count) {
+    const n = count || 0;
+    // No sessions yet — nothing to show
+    if (!n) return "";
+    return `<span class="practice-badge">🎸 ${n}×</span>`;
+  }
+
+  // ── Streak banner (Duolingo-style daily summary) ──
+  function renderStreakBanner() {
+    const daySet = practicedDaySet();
+    const streak = computeStreak(daySet);
+
+    // Sessions logged today across all songs
+    const today = startOfDay(Date.now());
+    let todayCount = 0;
+    let total = 0;
+    for (const s of songs) {
+      if (!Array.isArray(s.practiceLog)) continue;
+      total += s.practiceLog.length;
+      todayCount += s.practiceLog.filter((ts) => startOfDay(ts) === today).length;
+    }
+
+    streakCountEl.textContent = streak;
+    todayCountEl.textContent = todayCount;
+    totalCountEl.textContent = total;
+    // Light up the streak when it's active so it feels rewarding
+    streakCountEl.parentElement.classList.toggle("active", streak > 0);
+  }
+
+  // ── Per-song practice stats + calendar ──
+  function openStats(id) {
+    const song = songs.find((s) => s.id === id);
+    if (!song) return;
+    const log = Array.isArray(song.practiceLog) ? song.practiceLog : [];
+
+    statsSongTitle.textContent = song.title || "Untitled";
+    statsSongArtist.textContent = song.artist || "";
+
+    statsTotalEl.textContent = song.practiceCount || log.length || 0;
+
+    // Per-song streak uses only this song's practice days
+    const songDays = new Set(log.map((ts) => startOfDay(ts)));
+    statsStreakEl.textContent = computeStreak(songDays);
+    statsLastEl.textContent = formatLastPlayed(song.lastPlayed);
+
+    renderCalendar(songDays);
+    showView(statsView);
+    if (window.Analytics) window.Analytics.track("stats-open");
+  }
+
+  // Renders a GitHub-style heatmap for roughly the last ~18 weeks of practice
+  function renderCalendar(daySet) {
+    const WEEKS = 18;
+    const oneDay = 24 * 60 * 60 * 1000;
+    statsCalendarEl.innerHTML = "";
+
+    // Anchor the grid to the end of the current week so today sits in the last column
+    const today = startOfDay(Date.now());
+    const todayDow = new Date(today).getDay(); // 0 = Sunday
+    const gridEnd = today + (6 - todayDow) * oneDay;
+    const gridStart = gridEnd - (WEEKS * 7 - 1) * oneDay;
+
+    for (let i = 0; i < WEEKS * 7; i++) {
+      const dayTs = gridStart + i * oneDay;
+      const cell = document.createElement("span");
+
+      // Future days (after today) render as empty placeholders
+      if (dayTs > today) {
+        cell.className = "cal-cell future";
+      } else {
+        const practiced = daySet.has(dayTs);
+        // Simple two-level intensity: practiced vs not (kept simple per request)
+        cell.className = "cal-cell " + (practiced ? "lvl-3" : "lvl-0");
+        const d = new Date(dayTs);
+        cell.title = d.toLocaleDateString() + (practiced ? " — practiced" : "");
+      }
+      statsCalendarEl.appendChild(cell);
+    }
+  }
+
+  // ── Tuner (fully offline: mic + Web Audio autocorrelation) ──
+  // Everything here runs locally in the browser — no network calls — so the
+  // tuner works with no connection, unlike a typical online phone tuner.
+  let audioCtx = null;
+  let analyser = null;
+  let micStream = null;
+  let tunerRAF = null;
+  let tunerActive = false;
+  let tunerBuf = null;
+
+  // Standard tuning reference pitches (Hz) for the six open strings
+  const STRING_FREQS = { E2: 82.41, A2: 110.0, D3: 146.83, G3: 196.0, B3: 246.94, E4: 329.63 };
+  const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+  // Convert a frequency to the nearest note name + how many cents off it is.
+  // Cents (100 = one semitone) tell us whether the string is flat or sharp.
+  function freqToNote(freq) {
+    const midi = Math.round(12 * Math.log2(freq / 440) + 69);
+    const noteFreq = 440 * Math.pow(2, (midi - 69) / 12);
+    const cents = Math.round(1200 * Math.log2(freq / noteFreq));
+    const name = NOTE_NAMES[(midi % 12 + 12) % 12];
+    const octave = Math.floor(midi / 12) - 1;
+    return { name, octave, cents, midi };
+  }
+
+  // Autocorrelation pitch detector — robust for low guitar notes where FFT
+  // peak-picking struggles. Returns frequency in Hz, or -1 if the signal is
+  // too quiet/noisy to trust.
+  function detectPitch(buf, sampleRate) {
+    const SIZE = buf.length;
+
+    // Bail out on near-silence so we don't chase noise
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < 0.01) return -1;
+
+    // Trim leading/trailing samples below a threshold to sharpen correlation
+    let r1 = 0, r2 = SIZE - 1;
+    const thres = 0.2;
+    for (let i = 0; i < SIZE / 2; i++) {
+      if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+    }
+    for (let i = 1; i < SIZE / 2; i++) {
+      if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+    }
+    const trimmed = buf.slice(r1, r2);
+    const n = trimmed.length;
+
+    const c = new Array(n).fill(0);
+    for (let lag = 0; lag < n; lag++) {
+      for (let i = 0; i < n - lag; i++) {
+        c[lag] += trimmed[i] * trimmed[i + lag];
+      }
+    }
+
+    // Skip the initial descent, then find the first strong correlation peak
+    let d = 0;
+    while (d < n - 1 && c[d] > c[d + 1]) d++;
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < n; i++) {
+      if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+    }
+    let T0 = maxpos;
+    if (T0 <= 0) return -1;
+
+    // Parabolic interpolation around the peak for a finer frequency estimate
+    const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
+    const a = (x1 + x3 - 2 * x2) / 2;
+    const b = (x3 - x1) / 2;
+    if (a) T0 = T0 - b / (2 * a);
+
+    return sampleRate / T0;
+  }
+
+  // Update the note readout, needle position and string highlight from a pitch
+  function renderTuner(freq) {
+    // No reliable pitch this frame — keep prior reading, just dim it
+    if (freq <= 0) {
+      tunerNote.classList.remove("in-tune");
+      tunerNote.classList.remove("detecting");
+      return;
+    }
+
+    const { name, octave, cents } = freqToNote(freq);
+    tunerNote.innerHTML = esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + octave + "</span>";
+    tunerFreq.textContent = freq.toFixed(1) + " Hz";
+
+    // Needle: map -50..+50 cents onto 0..100% of the track width
+    const clamped = Math.max(-50, Math.min(50, cents));
+    tunerNeedle.style.left = (50 + clamped) + "%";
+
+    // Within ±5 cents counts as "in tune"
+    const inTune = Math.abs(cents) <= 5;
+    tunerNote.classList.toggle("in-tune", inTune);
+    tunerNote.classList.toggle("detecting", !inTune);
+    tunerNeedle.classList.toggle("in-tune", inTune);
+
+    // In tune
+    if (inTune) {
+      tunerStatus.textContent = "In tune ✓";
+      tunerStatus.className = "tuner-status in-tune";
+    // Pitch is below target — tighten the string
+    } else if (cents < 0) {
+      tunerStatus.textContent = "Too flat — tune up ↑";
+      tunerStatus.className = "tuner-status flat";
+    // Pitch is above target — loosen the string
+    } else {
+      tunerStatus.textContent = "Too sharp — tune down ↓";
+      tunerStatus.className = "tuner-status sharp";
+    }
+
+    highlightClosestString(freq, inTune);
+  }
+
+  // Highlight whichever standard-tuning string is closest to the detected pitch
+  function highlightClosestString(freq, inTune) {
+    let closest = null, best = Infinity;
+    for (const [note, f] of Object.entries(STRING_FREQS)) {
+      const dist = Math.abs(1200 * Math.log2(freq / f));
+      if (dist < best) { best = dist; closest = note; }
+    }
+    tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
+      const isTarget = btn.dataset.note === closest;
+      btn.classList.toggle("target", isTarget);
+      btn.classList.toggle("in-tune", isTarget && inTune);
+    });
+  }
+
+  function tunerLoop() {
+    if (!tunerActive) return;
+    analyser.getFloatTimeDomainData(tunerBuf);
+    const freq = detectPitch(tunerBuf, audioCtx.sampleRate);
+    renderTuner(freq);
+    tunerRAF = requestAnimationFrame(tunerLoop);
+  }
+
+  async function startTuner() {
+    tunerMsg.textContent = "";
+    tunerMsg.className = "tuner-msg";
+    try {
+      // Request the mic — this is the only permission the tuner needs
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
+      });
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // iOS starts the context suspended until a user gesture resumes it
+      if (audioCtx.state === "suspended") await audioCtx.resume();
+      const source = audioCtx.createMediaStreamSource(micStream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      tunerBuf = new Float32Array(analyser.fftSize);
+      source.connect(analyser);
+
+      tunerActive = true;
+      tunerToggle.textContent = "Stop tuner";
+      tunerToggle.classList.add("active");
+      tunerFreq.textContent = "Listening…";
+      if (window.Analytics) window.Analytics.track("tuner-start");
+      tunerLoop();
+    } catch (err) {
+      // Most common cause: user denied mic access or no mic present
+      tunerMsg.textContent = "Microphone access is needed for the tuner. Please allow it and try again.";
+      tunerMsg.className = "tuner-msg error";
+    }
+  }
+
+  function stopTuner() {
+    tunerActive = false;
+    if (tunerRAF) { cancelAnimationFrame(tunerRAF); tunerRAF = null; }
+    // Release the mic so the browser stops showing the recording indicator
+    if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    analyser = null;
+    tunerToggle.textContent = "Start tuner";
+    tunerToggle.classList.remove("active");
+    tunerNote.textContent = "—";
+    tunerNote.className = "tuner-note";
+    tunerFreq.textContent = "Tap start & play a string";
+    tunerStatus.textContent = "—";
+    tunerStatus.className = "tuner-status";
+    tunerNeedle.style.left = "50%";
+    tunerNeedle.classList.remove("in-tune");
+    tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
+      btn.classList.remove("target", "in-tune");
+    });
+  }
+
+  function openTuner() {
+    showView(tunerView);
+    if (window.Analytics) window.Analytics.track("tuner-open");
+  }
+
   // ── Event Wiring ──
   addSongBtn.addEventListener("click", () => openEditor(null));
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
   playerBackBtn.addEventListener("click", () => { showView(libraryView); stopScroll(); });
   editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
+  statsCurrentBtn.addEventListener("click", () => openStats(currentSongId));
+  statsBackBtn.addEventListener("click", () => openPlayer(currentSongId));
 
-  scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });
-  scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
+  // Tuner: open/close and start/stop mic listening
+  tunerBtn.addEventListener("click", openTuner);
+  tunerBackBtn.addEventListener("click", () => { stopTuner(); showView(libraryView); });
+  tunerToggle.addEventListener("click", () => { tunerActive ? stopTuner() : startTuner(); });
+
+  scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });  scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
   scrollFaster.addEventListener("click", () => { speed = Math.min(50, speed + 1); updateSpeedLabel(); });
 
   searchInput.addEventListener("input", () => {
@@ -518,6 +1005,7 @@
         }
         saveSongs();
         renderLibrary();
+        renderStreakBanner();
         alert(`Import done: ${added} added, ${updated} updated.`);
       } catch {
         alert("Invalid backup file.");
@@ -529,8 +1017,10 @@
 
   // ── Init ──
   loadSongs();
-  mergeSongsFromRepo().then(() => renderLibrary());
+  migratePracticeData();
+  mergeSongsFromRepo().then(() => { renderLibrary(); renderStreakBanner(); });
   renderLibrary();
+  renderStreakBanner();
   updateSpeedLabel();
 
   // ── Service Worker ──

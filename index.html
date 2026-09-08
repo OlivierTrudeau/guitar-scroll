@@ -20,6 +20,7 @@
     <div id="library-view" class="view active">
       <header class="top-bar">
         <h1>GuitarScroll</h1>
+        <button id="tuner-btn" class="text-btn" aria-label="Tuner">Tuner</button>
         <button id="add-song-btn" class="icon-btn" aria-label="Add song">＋</button>
         <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
       </header>
@@ -27,6 +28,21 @@
         <button id="export-btn" class="menu-item">Export backup</button>
         <button id="import-btn" class="menu-item">Import backup</button>
         <input id="import-file" type="file" accept=".json" hidden>
+      </div>
+      <!-- Duolingo-style daily practice summary -->
+      <div id="streak-banner" class="streak-banner">
+        <div class="streak-stat">
+          <span id="streak-count" class="streak-num">0</span>
+          <span class="streak-label">🔥 day streak</span>
+        </div>
+        <div class="streak-stat">
+          <span id="today-count" class="streak-num">0</span>
+          <span class="streak-label">🎸 played today</span>
+        </div>
+        <div class="streak-stat">
+          <span id="total-count" class="streak-num">0</span>
+          <span class="streak-label">✅ total sessions</span>
+        </div>
       </div>
       <div class="filter-bar">
         <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
@@ -83,6 +99,7 @@
           <h1 id="player-song-title"></h1>
           <span id="player-song-artist" class="artist-sub"></span>
         </div>
+        <button id="stats-current-btn" class="icon-btn" aria-label="Practice stats">📊</button>
         <button id="edit-current-btn" class="icon-btn" aria-label="Edit">✎</button>
       </header>
       <div id="song-meta" class="song-meta"></div>
@@ -95,7 +112,87 @@
       </div>
     </div>
 
+    <!-- PRACTICE STATS VIEW -->
+    <div id="stats-view" class="view">
+      <header class="top-bar">
+        <button id="stats-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <div class="player-title-wrap">
+          <h1 id="stats-song-title"></h1>
+          <span id="stats-song-artist" class="artist-sub"></span>
+        </div>
+      </header>
+      <div class="stats-body">
+        <div class="stats-cards">
+          <div class="stats-card">
+            <span id="stats-total" class="stats-num">0</span>
+            <span class="stats-card-label">Times practiced</span>
+          </div>
+          <div class="stats-card">
+            <span id="stats-streak" class="stats-num">0</span>
+            <span class="stats-card-label">Day streak</span>
+          </div>
+          <div class="stats-card">
+            <span id="stats-last" class="stats-num">–</span>
+            <span class="stats-card-label">Last played</span>
+          </div>
+        </div>
+        <h2 class="stats-heading">Practice calendar</h2>
+        <div id="stats-calendar" class="calendar"></div>
+        <p class="calendar-legend">
+          <span class="cal-cell lvl-0"></span> none
+          <span class="cal-cell lvl-1"></span>
+          <span class="cal-cell lvl-2"></span>
+          <span class="cal-cell lvl-3"></span> more
+        </p>
+      </div>
+    </div>
+
+    <!-- TUNER VIEW -->
+    <div id="tuner-view" class="view">
+      <header class="top-bar">
+        <button id="tuner-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <h1>Tuner</h1>
+      </header>
+      <div class="tuner-body">
+        <!-- Big note readout + cents deviation dial -->
+        <div class="tuner-note-wrap">
+          <div id="tuner-note" class="tuner-note">—</div>
+          <div id="tuner-freq" class="tuner-freq">Tap start & play a string</div>
+        </div>
+
+        <!-- Needle gauge: center = in tune, left = flat, right = sharp -->
+        <div class="tuner-gauge">
+          <div class="gauge-ticks">
+            <span class="tick tick-edge">-50</span>
+            <span class="tick">-25</span>
+            <span class="tick tick-center">0</span>
+            <span class="tick">+25</span>
+            <span class="tick tick-edge">+50</span>
+          </div>
+          <div class="gauge-track">
+            <div class="gauge-center-line"></div>
+            <div id="tuner-needle" class="gauge-needle"></div>
+          </div>
+          <div id="tuner-status" class="tuner-status">—</div>
+        </div>
+
+        <!-- Standard tuning reference strings; highlights the closest one -->
+        <div class="tuner-strings">
+          <button class="tuner-string" data-note="E2">E<sub>2</sub></button>
+          <button class="tuner-string" data-note="A2">A<sub>2</sub></button>
+          <button class="tuner-string" data-note="D3">D<sub>3</sub></button>
+          <button class="tuner-string" data-note="G3">G<sub>3</sub></button>
+          <button class="tuner-string" data-note="B3">B<sub>3</sub></button>
+          <button class="tuner-string" data-note="E4">E<sub>4</sub></button>
+        </div>
+
+        <button id="tuner-toggle" class="tuner-start-btn">Start tuner</button>
+        <p id="tuner-msg" class="tuner-msg"></p>
+      </div>
+    </div>
+
   </div>
+  <script src="analytics.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

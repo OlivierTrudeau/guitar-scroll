@@ -1,9 +1,10 @@
-const CACHE_NAME = "guitarscroll-v8";
+const CACHE_NAME = "guitarscroll-v12";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./analytics.js",
   "./manifest.json",
   "./icon-192.svg",
   "./icon-512.svg",
@@ -27,6 +28,12 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
+  // Only handle same-origin requests — let external calls (e.g. GoatCounter
+  // analytics on gc.zgo.at) go straight to the network, untouched by the cache.
+  if (new URL(e.request.url).origin !== self.location.origin) {
+    return;
+  }
+
   if (e.request.url.includes("songs.json")) {
     e.respondWith(
       fetch(e.request)
