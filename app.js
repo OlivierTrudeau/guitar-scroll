@@ -33,6 +33,7 @@
   const speedLabel = $("#speed-label");
   const searchInput = $("#search-input");
   const proficiencyFilter = $("#proficiency-filter");
+  const sortFilter = $("#sort-filter");
   const proficiencyStarsEl = $("#proficiency-stars");
   const proficiencyLabel = $("#proficiency-label");
   const menuBtn = $("#menu-btn");
@@ -76,6 +77,7 @@
   const RUSTY_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
   let editingProficiency = 0;
   let activeFilterLevel = "all";
+  let activeSort = "default";
   let searchQuery = "";
 
   // ── Persistence ──
@@ -138,7 +140,7 @@
 
   // ── Library ──
   function getFilteredSongs() {
-    return songs.filter((song) => {
+    const filtered = songs.filter((song) => {
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const matchesTitle = (song.title || "").toLowerCase().includes(q);
@@ -152,6 +154,24 @@
       }
       return true;
     });
+
+    // Never-played songs sort as "infinitely stale" (0) so they surface first when
+    // finding what to practice, and last when sorting by most recent
+    const lastTs = (s) => s.lastPlayed || 0;
+
+    // Least recently played first — the "what should I brush up on?" view
+    if (activeSort === "rusty") {
+      filtered.sort((a, b) => lastTs(a) - lastTs(b));
+    // Most recently played first
+    } else if (activeSort === "recent") {
+      filtered.sort((a, b) => lastTs(b) - lastTs(a));
+    // Most practiced sessions first
+    } else if (activeSort === "most") {
+      filtered.sort((a, b) => (b.practiceCount || 0) - (a.practiceCount || 0));
+    }
+    // "default" — leave in original library order
+
+    return filtered;
   }
 
   function proficiencyStars(level) {
@@ -947,6 +967,15 @@
     proficiencyFilter.querySelectorAll(".filter-pill").forEach((p) => p.classList.remove("active"));
     pill.classList.add("active");
     activeFilterLevel = pill.dataset.level;
+    renderLibrary();
+  });
+
+  sortFilter.addEventListener("click", (e) => {
+    const pill = e.target.closest(".filter-pill");
+    if (!pill) return;
+    sortFilter.querySelectorAll(".filter-pill").forEach((p) => p.classList.remove("active"));
+    pill.classList.add("active");
+    activeSort = pill.dataset.sort;
     renderLibrary();
   });
 
