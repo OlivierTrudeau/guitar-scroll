@@ -748,6 +748,13 @@ html, body {
   border-color: var(--accent);
   color: #fff;
 }
+/* Locked in-tune strings stay green for the whole session (even when not the target) */
+.tuner-string.in-tune {
+  background: #46d17a;
+  border-color: #46d17a;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(70, 209, 122, 0.35);
+}
 .tuner-string.target.in-tune {
   background: #46d17a;
   border-color: #46d17a;

@@ -1210,6 +1210,20 @@
   let tunerActive = false;
   let tunerBuf = null;
 
+  // Smoothing / lock state — keeps the needle from jittering and remembers
+  // which strings the player has already gotten in tune during this session.
+  let smoothedFreq = 0;
+  let smoothedCents = 0;
+  let recentFreqs = [];
+  let inTuneStreak = 0;
+  let tunedStrings = new Set(); // sticky green until the tuner is stopped
+  const FREQ_SMOOTH = 0.1; // EMA weight for new samples (lower = calmer)
+  const CENTS_SMOOTH = 0.12; // separate EMA for the needle so it doesn't twitch
+  const IN_TUNE_CENTS = 5; // how close counts as "in tune"
+  const IN_TUNE_HOLD_FRAMES = 12; // must stay in tune this many frames to lock
+  const STRING_MATCH_CENTS = 70; // ignore pitches that aren't near any open string
+  const MAX_JUMP_CENTS = 90; // reject frame-to-frame leaps bigger than this
+
   // Standard tuning reference pitches (Hz) for the six open strings
   const STRING_FREQS = { E2: 82.41, A2: 110.0, D3: 146.83, G3: 196.0, B3: 246.94, E4: 329.63 };
   const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -1235,7 +1249,7 @@
     let rms = 0;
     for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
     rms = Math.sqrt(rms / SIZE);
-    if (rms < 0.01) return -1;
+    if (rms < 0.015) return -1;
 
     // Trim leading/trailing samples below a threshold to sharpen correlation
     let r1 = 0, r2 = SIZE - 1;
@@ -1248,6 +1262,12 @@
     }
     const trimmed = buf.slice(r1, r2);
     const n = trimmed.length;
+    if (n < 64) return -1;
+
+    // Limit lag search to guitar-ish range (~70–400 Hz) for fewer octave errors
+    const minLag = Math.floor(sampleRate / 400);
+    const maxLag = Math.min(n - 1, Math.floor(sampleRate / 70));
+    if (maxLag <= minLag) return -1;
 
     const c = new Array(n).fill(0);
     for (let lag = 0; lag < n; lag++) {
@@ -1256,15 +1276,13 @@
       }
     }
 
-    // Skip the initial descent, then find the first strong correlation peak
-    let d = 0;
-    while (d < n - 1 && c[d] > c[d + 1]) d++;
+    // Find the strongest correlation peak inside the guitar lag window
     let maxval = -1, maxpos = -1;
-    for (let i = d; i < n; i++) {
+    for (let i = minLag; i <= maxLag; i++) {
       if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
     }
     let T0 = maxpos;
-    if (T0 <= 0) return -1;
+    if (T0 <= 0 || maxval < c[0] * 0.25) return -1;
 
     // Parabolic interpolation around the peak for a finer frequency estimate
     const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
@@ -1275,16 +1293,73 @@
     return sampleRate / T0;
   }
 
+  // Median of the last few readings — kills single-frame spikes
+  function median(values) {
+    if (!values.length) return 0;
+    const sorted = values.slice().sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+
+  function smoothFrequency(rawFreq) {
+    if (rawFreq <= 0) {
+      // Decay toward silence slowly so a brief gap doesn't blank the UI
+      if (smoothedFreq > 0) smoothedFreq *= 0.92;
+      if (smoothedFreq < 20) {
+        smoothedFreq = 0;
+        recentFreqs = [];
+      }
+      return smoothedFreq;
+    }
+
+    // Reject wild jumps (octave errors / noise) unless we have no prior reading
+    if (smoothedFreq > 0) {
+      const jumpCents = Math.abs(1200 * Math.log2(rawFreq / smoothedFreq));
+      if (jumpCents > 150) return smoothedFreq;
+    }
+
+    recentFreqs.push(rawFreq);
+    if (recentFreqs.length > 7) recentFreqs.shift();
+    const med = median(recentFreqs);
+
+    if (!smoothedFreq) smoothedFreq = med;
+    else smoothedFreq = smoothedFreq * (1 - FREQ_SMOOTH) + med * FREQ_SMOOTH;
+    return smoothedFreq;
+  }
+
+  function closestString(freq) {
+    let closest = null, best = Infinity;
+    for (const [note, f] of Object.entries(STRING_FREQS)) {
+      const dist = Math.abs(1200 * Math.log2(freq / f));
+      if (dist < best) { best = dist; closest = note; }
+    }
+    return { note: closest, cents: best };
+  }
+
   // Update the note readout, needle position and string highlight from a pitch
-  function renderTuner(freq) {
-    // No reliable pitch this frame — keep prior reading, just dim it
+  function renderTuner(rawFreq) {
+    const freq = smoothFrequency(rawFreq);
+
+    // No reliable pitch — keep prior reading, just stop claiming "in tune"
     if (freq <= 0) {
+      inTuneStreak = 0;
       tunerNote.classList.remove("in-tune");
       tunerNote.classList.remove("detecting");
       return;
     }
 
-    const { name, octave, cents } = freqToNote(freq);
+    const match = closestString(freq);
+    // Ignore pitches that aren't near any open string (harmonics / room noise)
+    if (match.cents > STRING_MATCH_CENTS) {
+      inTuneStreak = 0;
+      return;
+    }
+
+    // Prefer cents relative to the closest guitar string, not arbitrary MIDI rounding
+    const targetFreq = STRING_FREQS[match.note];
+    const cents = Math.round(1200 * Math.log2(freq / targetFreq));
+    const { name, octave } = freqToNote(targetFreq);
+
     tunerNote.innerHTML = esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + octave + "</span>";
     tunerFreq.textContent = freq.toFixed(1) + " Hz";
 
@@ -1292,40 +1367,43 @@
     const clamped = Math.max(-50, Math.min(50, cents));
     tunerNeedle.style.left = (50 + clamped) + "%";
 
-    // Within ±5 cents counts as "in tune"
-    const inTune = Math.abs(cents) <= 5;
-    tunerNote.classList.toggle("in-tune", inTune);
-    tunerNote.classList.toggle("detecting", !inTune);
-    tunerNeedle.classList.toggle("in-tune", inTune);
+    const closeEnough = Math.abs(cents) <= IN_TUNE_CENTS;
+    if (closeEnough) inTuneStreak++;
+    else inTuneStreak = 0;
 
-    // In tune
-    if (inTune) {
-      tunerStatus.textContent = "In tune ✓";
+    // Only lock a string after it stays in tune for a few frames — avoids green flash
+    if (inTuneStreak >= IN_TUNE_HOLD_FRAMES) {
+      tunedStrings.add(match.note);
+    }
+
+    const locked = tunedStrings.has(match.note);
+    const inTune = closeEnough || locked;
+    tunerNote.classList.toggle("in-tune", closeEnough);
+    tunerNote.classList.toggle("detecting", !closeEnough);
+    tunerNeedle.classList.toggle("in-tune", closeEnough);
+
+    if (closeEnough) {
+      tunerStatus.textContent = locked ? "In tune ✓  ·  locked" : "In tune ✓";
       tunerStatus.className = "tuner-status in-tune";
-    // Pitch is below target — tighten the string
     } else if (cents < 0) {
       tunerStatus.textContent = "Too flat — tune up ↑";
       tunerStatus.className = "tuner-status flat";
-    // Pitch is above target — loosen the string
     } else {
       tunerStatus.textContent = "Too sharp — tune down ↓";
       tunerStatus.className = "tuner-status sharp";
     }
 
-    highlightClosestString(freq, inTune);
+    highlightStrings(match.note);
   }
 
-  // Highlight whichever standard-tuning string is closest to the detected pitch
-  function highlightClosestString(freq, inTune) {
-    let closest = null, best = Infinity;
-    for (const [note, f] of Object.entries(STRING_FREQS)) {
-      const dist = Math.abs(1200 * Math.log2(freq / f));
-      if (dist < best) { best = dist; closest = note; }
-    }
+  // Highlight the active target string; keep already-tuned strings green
+  function highlightStrings(targetNote) {
     tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
-      const isTarget = btn.dataset.note === closest;
-      btn.classList.toggle("target", isTarget);
-      btn.classList.toggle("in-tune", isTarget && inTune);
+      const note = btn.dataset.note;
+      const isTarget = note === targetNote;
+      const isTuned = tunedStrings.has(note);
+      btn.classList.toggle("target", isTarget && !isTuned);
+      btn.classList.toggle("in-tune", isTuned);
     });
   }
 
@@ -1350,9 +1428,14 @@
       if (audioCtx.state === "suspended") await audioCtx.resume();
       const source = audioCtx.createMediaStreamSource(micStream);
       analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 2048;
+      analyser.fftSize = 4096; // more samples → steadier low-string detection
       tunerBuf = new Float32Array(analyser.fftSize);
       source.connect(analyser);
+
+      smoothedFreq = 0;
+      recentFreqs = [];
+      inTuneStreak = 0;
+      tunedStrings = new Set();
 
       tunerActive = true;
       tunerToggle.textContent = "Stop tuner";
@@ -1374,6 +1457,10 @@
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
     analyser = null;
+    smoothedFreq = 0;
+    recentFreqs = [];
+    inTuneStreak = 0;
+    tunedStrings = new Set();
     tunerToggle.textContent = "Start tuner";
     tunerToggle.classList.remove("active");
     tunerNote.textContent = "—";
