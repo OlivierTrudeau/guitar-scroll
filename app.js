@@ -1304,9 +1304,10 @@
   function smoothFrequency(rawFreq) {
     if (rawFreq <= 0) {
       // Decay toward silence slowly so a brief gap doesn't blank the UI
-      if (smoothedFreq > 0) smoothedFreq *= 0.92;
+      if (smoothedFreq > 0) smoothedFreq *= 0.94;
       if (smoothedFreq < 20) {
         smoothedFreq = 0;
+        smoothedCents = 0;
         recentFreqs = [];
       }
       return smoothedFreq;
@@ -1315,11 +1316,11 @@
     // Reject wild jumps (octave errors / noise) unless we have no prior reading
     if (smoothedFreq > 0) {
       const jumpCents = Math.abs(1200 * Math.log2(rawFreq / smoothedFreq));
-      if (jumpCents > 150) return smoothedFreq;
+      if (jumpCents > MAX_JUMP_CENTS) return smoothedFreq;
     }
 
     recentFreqs.push(rawFreq);
-    if (recentFreqs.length > 7) recentFreqs.shift();
+    if (recentFreqs.length > 11) recentFreqs.shift();
     const med = median(recentFreqs);
 
     if (!smoothedFreq) smoothedFreq = med;
@@ -1357,14 +1358,17 @@
 
     // Prefer cents relative to the closest guitar string, not arbitrary MIDI rounding
     const targetFreq = STRING_FREQS[match.note];
-    const cents = Math.round(1200 * Math.log2(freq / targetFreq));
+    const rawCents = 1200 * Math.log2(freq / targetFreq);
+    // Smooth cents separately so the needle doesn't twitch on tiny pitch noise
+    smoothedCents = smoothedCents * (1 - CENTS_SMOOTH) + rawCents * CENTS_SMOOTH;
+    const cents = Math.round(smoothedCents);
     const { name, octave } = freqToNote(targetFreq);
 
     tunerNote.innerHTML = esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + octave + "</span>";
     tunerFreq.textContent = freq.toFixed(1) + " Hz";
 
     // Needle: map -50..+50 cents onto 0..100% of the track width
-    const clamped = Math.max(-50, Math.min(50, cents));
+    const clamped = Math.max(-50, Math.min(50, smoothedCents));
     tunerNeedle.style.left = (50 + clamped) + "%";
 
     const closeEnough = Math.abs(cents) <= IN_TUNE_CENTS;
@@ -1377,13 +1381,16 @@
     }
 
     const locked = tunedStrings.has(match.note);
-    const inTune = closeEnough || locked;
-    tunerNote.classList.toggle("in-tune", closeEnough);
-    tunerNote.classList.toggle("detecting", !closeEnough);
-    tunerNeedle.classList.toggle("in-tune", closeEnough);
+    tunerNote.classList.toggle("in-tune", closeEnough || locked);
+    tunerNote.classList.toggle("detecting", !(closeEnough || locked));
+    tunerNeedle.classList.toggle("in-tune", closeEnough || locked);
 
-    if (closeEnough) {
-      tunerStatus.textContent = locked ? "In tune ✓  ·  locked" : "In tune ✓";
+    if (closeEnough || locked) {
+      const done = tunedStrings.size;
+      tunerStatus.textContent =
+        locked
+          ? "In tune ✓  ·  " + done + "/6 locked"
+          : "In tune ✓";
       tunerStatus.className = "tuner-status in-tune";
     } else if (cents < 0) {
       tunerStatus.textContent = "Too flat — tune up ↑";
@@ -1404,6 +1411,11 @@
       const isTuned = tunedStrings.has(note);
       btn.classList.toggle("target", isTarget && !isTuned);
       btn.classList.toggle("in-tune", isTuned);
+      // Tiny check mark once locked so progress across all six strings is obvious
+      if (isTuned && !btn.dataset.lockedLabel) {
+        btn.dataset.lockedLabel = "1";
+        btn.setAttribute("aria-label", note + " in tune");
+      }
     });
   }
 
@@ -1433,9 +1445,14 @@
       source.connect(analyser);
 
       smoothedFreq = 0;
+      smoothedCents = 0;
       recentFreqs = [];
       inTuneStreak = 0;
       tunedStrings = new Set();
+      tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
+        delete btn.dataset.lockedLabel;
+        btn.classList.remove("target", "in-tune");
+      });
 
       tunerActive = true;
       tunerToggle.textContent = "Stop tuner";
@@ -1458,6 +1475,7 @@
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
     analyser = null;
     smoothedFreq = 0;
+    smoothedCents = 0;
     recentFreqs = [];
     inTuneStreak = 0;
     tunedStrings = new Set();
@@ -1471,6 +1489,7 @@
     tunerNeedle.style.left = "50%";
     tunerNeedle.classList.remove("in-tune");
     tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
+      delete btn.dataset.lockedLabel;
       btn.classList.remove("target", "in-tune");
     });
   }
