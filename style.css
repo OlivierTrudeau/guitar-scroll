@@ -697,7 +697,7 @@ html, body {
   stroke-linecap: round;
   transition: stroke .2s;
 }
-/* The ±4 cent window at the top of the dial you are aiming the pointer into */
+/* The ±5 cent window at the top of the dial you are aiming the pointer into */
 .dial-zone {
   fill: none;
   stroke: #46d17a;

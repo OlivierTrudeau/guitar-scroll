@@ -1217,8 +1217,14 @@
   const NEW_NOTE_CENTS = 60; // a jump bigger than this means a different string
   const NEW_NOTE_FRAMES = 2; // ...but only after it repeats, so noise can't move us
   const HISTORY_LEN = 5;
-  const IN_TUNE_CENTS = 3;
-  const IN_TUNE_HOLD_FRAMES = 8;
+  // Five cents is under a fifth of the gap between the dial's 25-cent marks and
+  // still tighter than anyone can hear, but it leaves room for the wobble of a
+  // freshly plucked string. A string counts as done once it has held that
+  // window for a second, so a needle swinging through the middle on its way
+  // past does not tick it off.
+  const IN_TUNE_CENTS = 5;
+  const IN_TUNE_HOLD_MS = 1000;
+  const IN_TUNE_HOLD_FRAMES = Math.round(IN_TUNE_HOLD_MS / TUNER_INTERVAL_MS);
   // Past a semitone and a half from every string in the tuning, naming a
   // string would be a guess — show the note actually being played instead and
   // let the player pin the string they meant.
