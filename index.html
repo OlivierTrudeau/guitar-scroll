@@ -165,11 +165,13 @@
       <header class="top-bar">
         <button id="tuner-back-btn" class="icon-btn" aria-label="Back">←</button>
         <h1>Tuner</h1>
+        <select id="tuner-tuning" class="tuner-tuning" aria-label="Tuning"></select>
       </header>
       <div class="tuner-body">
-        <!-- Big note readout + cents deviation dial -->
+        <!-- Big note readout, signed cents offset, measured pitch -->
         <div class="tuner-note-wrap">
           <div id="tuner-note" class="tuner-note">—</div>
+          <div id="tuner-cents" class="tuner-cents"></div>
           <div id="tuner-freq" class="tuner-freq">Tap start & play a string</div>
         </div>
 
@@ -183,29 +185,26 @@
             <span class="tick tick-edge">+50</span>
           </div>
           <div class="gauge-track">
+            <div class="gauge-band"></div>
             <div class="gauge-center-line"></div>
             <div id="tuner-needle" class="gauge-needle"></div>
           </div>
           <div id="tuner-status" class="tuner-status">—</div>
         </div>
 
-        <!-- Standard tuning reference strings; highlights the closest one -->
-        <div class="tuner-strings">
-          <button class="tuner-string" data-note="E2">E<sub>2</sub></button>
-          <button class="tuner-string" data-note="A2">A<sub>2</sub></button>
-          <button class="tuner-string" data-note="D3">D<sub>3</sub></button>
-          <button class="tuner-string" data-note="G3">G<sub>3</sub></button>
-          <button class="tuner-string" data-note="B3">B<sub>3</sub></button>
-          <button class="tuner-string" data-note="E4">E<sub>4</sub></button>
-        </div>
+        <!-- Reference strings for the chosen tuning; tap one to lock onto it -->
+        <div class="tuner-strings"></div>
+        <p id="tuner-hint" class="tuner-hint">Tap a string to lock the tuner to it</p>
 
         <button id="tuner-toggle" class="tuner-start-btn">Start tuner</button>
+        <div class="tuner-level" aria-hidden="true"><div id="tuner-level-fill" class="tuner-level-fill"></div></div>
         <p id="tuner-msg" class="tuner-msg"></p>
       </div>
     </div>
 
   </div>
   <script src="analytics.js"></script>
+  <script src="pitch.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

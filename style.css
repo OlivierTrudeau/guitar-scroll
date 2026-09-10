@@ -635,6 +635,18 @@ html, body {
 }
 
 /* ── Tuner ── */
+.tuner-tuning {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 8px;
+  max-width: 45%;
+  cursor: pointer;
+}
 .tuner-body {
   flex: 1;
   overflow-y: auto;
@@ -642,7 +654,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
+  gap: 22px;
   padding: 24px 20px calc(24px + var(--safe-bottom));
 }
 .tuner-note-wrap {
@@ -659,8 +671,21 @@ html, body {
 /* In-tune note glows green; off-pitch note uses the accent gold */
 .tuner-note.in-tune { color: #46d17a; }
 .tuner-note.detecting { color: var(--chord); }
+/* Dimmed while the last note fades out and no fresh pitch is coming in */
+.tuner-note.stale { opacity: .4; }
+.tuner-cents {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 6px;
+  min-height: 20px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+}
+.tuner-cents.flat, .tuner-cents.sharp { color: var(--chord); }
+.tuner-cents.in-tune { color: #46d17a; }
 .tuner-freq {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text2);
   margin-top: 8px;
   font-variant-numeric: tabular-nums;
@@ -686,6 +711,15 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
+}
+/* The window that counts as in tune, ±3 cents on a ±50 cent track */
+.gauge-band {
+  position: absolute;
+  left: 47%;
+  width: 6%;
+  top: 0;
+  bottom: 0;
+  background: rgba(70, 209, 122, 0.14);
 }
 .gauge-center-line {
   position: absolute;
@@ -759,6 +793,17 @@ html, body {
   background: #46d17a;
   border-color: #46d17a;
 }
+/* Pinned by the player: the tuner ignores every other string until untapped */
+.tuner-string.pinned {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.tuner-hint {
+  font-size: 12px;
+  color: var(--text2);
+  text-align: center;
+  margin-top: -14px;
+}
+.tuner-hint.pinned { color: var(--accent); }
 
 .tuner-start-btn {
   background: var(--accent);
@@ -774,6 +819,21 @@ html, body {
 }
 .tuner-start-btn:active { background: var(--accent-dim); }
 .tuner-start-btn.active { background: #e05050; }
+/* Input level, so a dead or muted mic is obvious straight away */
+.tuner-level {
+  width: 140px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface2);
+  overflow: hidden;
+  margin-top: -14px;
+}
+.tuner-level-fill {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width .1s linear;
+}
 .tuner-msg {
   color: var(--text2);
   font-size: 13px;

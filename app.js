@@ -48,11 +48,15 @@
   const tunerBackBtn = $("#tuner-back-btn");
   const tunerToggle = $("#tuner-toggle");
   const tunerNote = $("#tuner-note");
+  const tunerCents = $("#tuner-cents");
   const tunerFreq = $("#tuner-freq");
   const tunerNeedle = $("#tuner-needle");
   const tunerStatus = $("#tuner-status");
   const tunerMsg = $("#tuner-msg");
+  const tunerHint = $("#tuner-hint");
   const tunerStringsEl = $(".tuner-strings");
+  const tunerTuningSelect = $("#tuner-tuning");
+  const tunerLevelFill = $("#tuner-level-fill");
   const exportBtn = $("#export-btn");
   const importBtn = $("#import-btn");
   const importFile = $("#import-file");
@@ -1200,197 +1204,224 @@
     }
   }
 
-  // ── Tuner (fully offline: mic + Web Audio autocorrelation) ──
+  // ── Tuner (fully offline: mic + Web Audio pitch detection) ──
   // Everything here runs locally in the browser — no network calls — so the
   // tuner works with no connection, unlike a typical online phone tuner.
+  // pitch.js does the actual pitch estimation; this half turns a stream of
+  // estimates into a readout that settles quickly without twitching.
+  const TUNING_KEY = "guitarscroll_tuning";
+  const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+  const TUNINGS = [
+    { id: "standard", label: "Standard", notes: ["E2", "A2", "D3", "G3", "B3", "E4"] },
+    { id: "drop-d", label: "Drop D", notes: ["D2", "A2", "D3", "G3", "B3", "E4"] },
+    { id: "half-step", label: "Half step down", notes: ["D#2", "G#2", "C#3", "F#3", "A#3", "D#4"] },
+    { id: "full-step", label: "Full step down", notes: ["D2", "G2", "C3", "F3", "A3", "D4"] },
+    { id: "drop-c", label: "Drop C", notes: ["C2", "G2", "C3", "F3", "A3", "D4"] },
+    { id: "dadgad", label: "DADGAD", notes: ["D2", "A2", "D3", "G3", "A3", "D4"] },
+    { id: "open-g", label: "Open G", notes: ["D2", "G2", "D3", "G3", "B3", "D4"] },
+    { id: "open-d", label: "Open D", notes: ["D2", "A2", "D3", "F#3", "A3", "D4"] },
+  ];
+
+  // 8192 samples is ~170 ms at 48 kHz — a dozen periods of the low E, which is
+  // what the detector needs down there. Windows overlap, so readings still
+  // arrive every TUNER_INTERVAL_MS.
+  const TUNER_FRAME = 8192;
+  const TUNER_INTERVAL_MS = 33;
+  // A single ringing string scores ~0.95; a strummed chord or room noise
+  // scores well under 0.5, and there is nothing sensible to show for those.
+  // Once a note is on screen the bar drops, so a string stays tracked as it
+  // decays into the noise instead of blinking out halfway through.
+  const MIN_CLARITY = 0.86;
+  const HELD_CLARITY = 0.78;
+  const HOLD_MS = 1500; // keep the last note on screen between plucks
+  const NEW_NOTE_CENTS = 60; // a jump bigger than this means a different string
+  const NEW_NOTE_FRAMES = 2; // ...but only after it repeats, so noise can't move us
+  const HISTORY_LEN = 5;
+  const IN_TUNE_CENTS = 3;
+  const IN_TUNE_HOLD_FRAMES = 8;
+  // Past a semitone and a half from every string in the tuning, naming a
+  // string would be a guess — show the note actually being played instead and
+  // let the player pin the string they meant.
+  const STRING_RANGE_CENTS = 150;
+
   let audioCtx = null;
   let analyser = null;
   let micStream = null;
+  let detector = null;
   let tunerRAF = null;
   let tunerActive = false;
   let tunerBuf = null;
+  let lastAnalysisAt = 0;
 
-  // Smoothing / lock state — keeps the needle from jittering and remembers
-  // which strings the player has already gotten in tune during this session.
-  let smoothedFreq = 0;
-  let smoothedCents = 0;
-  let recentFreqs = [];
-  let inTuneStreak = 0;
+  let activeTuning = TUNINGS[0];
+  let pinnedNote = null; // string the player locked onto by tapping it
   let tunedStrings = new Set(); // sticky green until the tuner is stopped
-  const FREQ_SMOOTH = 0.1; // EMA weight for new samples (lower = calmer)
-  const CENTS_SMOOTH = 0.12; // separate EMA for the needle so it doesn't twitch
-  const IN_TUNE_CENTS = 5; // how close counts as "in tune"
-  const IN_TUNE_HOLD_FRAMES = 12; // must stay in tune this many frames to lock
-  const STRING_MATCH_CENTS = 70; // ignore pitches that aren't near any open string
-  const MAX_JUMP_CENTS = 90; // reject frame-to-frame leaps bigger than this
 
-  // Standard tuning reference pitches (Hz) for the six open strings
-  const STRING_FREQS = { E2: 82.41, A2: 110.0, D3: 146.83, G3: 196.0, B3: 246.94, E4: 329.63 };
-  const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  // Displayed pitch is tracked in log space so smoothing is even across octaves.
+  let smoothedLog = 0;
+  let hasReading = false;
+  let recentFreqs = [];
+  let pendingFreqs = [];
+  let lastGoodAt = 0;
+  let inTuneStreak = 0;
 
-  // Convert a frequency to the nearest note name + how many cents off it is.
-  // Cents (100 = one semitone) tell us whether the string is flat or sharp.
-  function freqToNote(freq) {
-    const midi = Math.round(12 * Math.log2(freq / 440) + 69);
-    const noteFreq = 440 * Math.pow(2, (midi - 69) / 12);
-    const cents = Math.round(1200 * Math.log2(freq / noteFreq));
-    const name = NOTE_NAMES[(midi % 12 + 12) % 12];
-    const octave = Math.floor(midi / 12) - 1;
-    return { name, octave, cents, midi };
+  function parseNote(note) {
+    const m = /^([A-G]#?)(-?\d+)$/.exec(note);
+    return { name: m[1], octave: m[2] };
   }
 
-  // Autocorrelation pitch detector — robust for low guitar notes where FFT
-  // peak-picking struggles. Returns frequency in Hz, or -1 if the signal is
-  // too quiet/noisy to trust.
-  function detectPitch(buf, sampleRate) {
-    const SIZE = buf.length;
-
-    // Bail out on near-silence so we don't chase noise
-    let rms = 0;
-    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
-    rms = Math.sqrt(rms / SIZE);
-    if (rms < 0.015) return -1;
-
-    // Trim leading/trailing samples below a threshold to sharpen correlation
-    let r1 = 0, r2 = SIZE - 1;
-    const thres = 0.2;
-    for (let i = 0; i < SIZE / 2; i++) {
-      if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-    }
-    for (let i = 1; i < SIZE / 2; i++) {
-      if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
-    }
-    const trimmed = buf.slice(r1, r2);
-    const n = trimmed.length;
-    if (n < 64) return -1;
-
-    // Limit lag search to guitar-ish range (~70–400 Hz) for fewer octave errors
-    const minLag = Math.floor(sampleRate / 400);
-    const maxLag = Math.min(n - 1, Math.floor(sampleRate / 70));
-    if (maxLag <= minLag) return -1;
-
-    const c = new Array(n).fill(0);
-    for (let lag = 0; lag < n; lag++) {
-      for (let i = 0; i < n - lag; i++) {
-        c[lag] += trimmed[i] * trimmed[i + lag];
-      }
-    }
-
-    // Find the strongest correlation peak inside the guitar lag window
-    let maxval = -1, maxpos = -1;
-    for (let i = minLag; i <= maxLag; i++) {
-      if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-    }
-    let T0 = maxpos;
-    if (T0 <= 0 || maxval < c[0] * 0.25) return -1;
-
-    // Parabolic interpolation around the peak for a finer frequency estimate
-    const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
-    const a = (x1 + x3 - 2 * x2) / 2;
-    const b = (x3 - x1) / 2;
-    if (a) T0 = T0 - b / (2 * a);
-
-    return sampleRate / T0;
+  function noteToMidi(note) {
+    const parts = parseNote(note);
+    return NOTE_NAMES.indexOf(parts.name) + (parseInt(parts.octave, 10) + 1) * 12;
   }
 
-  // Median of the last few readings — kills single-frame spikes
+  function midiToFreq(midi) {
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  function noteFreq(note) {
+    return midiToFreq(noteToMidi(note));
+  }
+
+  function centsBetween(freq, reference) {
+    return 1200 * Math.log2(freq / reference);
+  }
+
   function median(values) {
     if (!values.length) return 0;
     const sorted = values.slice().sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
+    const mid = sorted.length >> 1;
     return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
-  function smoothFrequency(rawFreq) {
-    if (rawFreq <= 0) {
-      // Decay toward silence slowly so a brief gap doesn't blank the UI
-      if (smoothedFreq > 0) smoothedFreq *= 0.94;
-      if (smoothedFreq < 20) {
-        smoothedFreq = 0;
-        smoothedCents = 0;
-        recentFreqs = [];
+  // Which string the readout should aim at: the one the player pinned, or
+  // whichever open string of the current tuning is closest.
+  function pickTarget(freq) {
+    if (pinnedNote) return pinnedNote;
+    let best = null;
+    let bestDist = Infinity;
+    for (const note of activeTuning.notes) {
+      const dist = Math.abs(centsBetween(freq, noteFreq(note)));
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = note;
       }
-      return smoothedFreq;
     }
-
-    // Reject wild jumps (octave errors / noise) unless we have no prior reading
-    if (smoothedFreq > 0) {
-      const jumpCents = Math.abs(1200 * Math.log2(rawFreq / smoothedFreq));
-      if (jumpCents > MAX_JUMP_CENTS) return smoothedFreq;
-    }
-
-    recentFreqs.push(rawFreq);
-    if (recentFreqs.length > 11) recentFreqs.shift();
-    const med = median(recentFreqs);
-
-    if (!smoothedFreq) smoothedFreq = med;
-    else smoothedFreq = smoothedFreq * (1 - FREQ_SMOOTH) + med * FREQ_SMOOTH;
-    return smoothedFreq;
+    return bestDist <= STRING_RANGE_CENTS ? best : null;
   }
 
-  function closestString(freq) {
-    let closest = null, best = Infinity;
-    for (const [note, f] of Object.entries(STRING_FREQS)) {
-      const dist = Math.abs(1200 * Math.log2(freq / f));
-      if (dist < best) { best = dist; closest = note; }
+  function buildTuningOptions() {
+    tunerTuningSelect.innerHTML = "";
+    for (const tuning of TUNINGS) {
+      const opt = document.createElement("option");
+      opt.value = tuning.id;
+      opt.textContent = tuning.label;
+      tunerTuningSelect.appendChild(opt);
     }
-    return { note: closest, cents: best };
+    tunerTuningSelect.value = activeTuning.id;
   }
 
-  // Update the note readout, needle position and string highlight from a pitch
-  function renderTuner(rawFreq) {
-    const freq = smoothFrequency(rawFreq);
+  function renderTunerStrings() {
+    tunerStringsEl.innerHTML = "";
+    for (const note of activeTuning.notes) {
+      const parts = parseNote(note);
+      const btn = document.createElement("button");
+      btn.className = "tuner-string";
+      btn.dataset.note = note;
+      btn.innerHTML = esc(parts.name) + "<sub>" + esc(parts.octave) + "</sub>";
+      btn.setAttribute("aria-label", "Tune the " + parts.name + parts.octave + " string");
+      tunerStringsEl.appendChild(btn);
+    }
+    highlightStrings(null);
+  }
 
-    // No reliable pitch — keep prior reading, just stop claiming "in tune"
-    if (freq <= 0) {
-      inTuneStreak = 0;
-      tunerNote.classList.remove("in-tune");
-      tunerNote.classList.remove("detecting");
-      return;
+  // Highlight the string being tuned; keep already-tuned ones green.
+  function highlightStrings(targetNote) {
+    tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
+      const note = btn.dataset.note;
+      btn.classList.toggle("target", note === targetNote);
+      btn.classList.toggle("in-tune", tunedStrings.has(note));
+      btn.classList.toggle("pinned", note === pinnedNote);
+    });
+  }
+
+  function updateHint() {
+    tunerHint.textContent = pinnedNote
+      ? "Locked to " + pinnedNote + " — tap it again for automatic"
+      : "Tap a string to lock the tuner to it";
+    tunerHint.classList.toggle("pinned", !!pinnedNote);
+  }
+
+  function clearReading() {
+    hasReading = false;
+    smoothedLog = 0;
+    recentFreqs = [];
+    pendingFreqs = [];
+    lastGoodAt = 0;
+    inTuneStreak = 0;
+  }
+
+  function renderWaiting() {
+    tunerNote.textContent = "—";
+    tunerNote.className = "tuner-note";
+    tunerCents.textContent = "";
+    tunerCents.className = "tuner-cents";
+    tunerFreq.textContent = tunerActive ? "Play a string…" : "Tap start & play a string";
+    tunerStatus.textContent = "—";
+    tunerStatus.className = "tuner-status";
+    tunerNeedle.style.left = "50%";
+    tunerNeedle.className = "gauge-needle";
+    highlightStrings(pinnedNote);
+  }
+
+  function renderReading(stale) {
+    const freq = Math.pow(2, smoothedLog);
+    const target = pickTarget(freq);
+
+    let name;
+    let octave;
+    let targetFreq;
+    if (target) {
+      const parts = parseNote(target);
+      name = parts.name;
+      octave = parts.octave;
+      targetFreq = noteFreq(target);
+    } else {
+      // Not an open string — fall back to naming the nearest semitone so the
+      // readout still means something on a fretted note.
+      const midi = Math.round(69 + 12 * Math.log2(freq / 440));
+      name = NOTE_NAMES[((midi % 12) + 12) % 12];
+      octave = String(Math.floor(midi / 12) - 1);
+      targetFreq = midiToFreq(midi);
     }
 
-    const match = closestString(freq);
-    // Ignore pitches that aren't near any open string (harmonics / room noise)
-    if (match.cents > STRING_MATCH_CENTS) {
-      inTuneStreak = 0;
-      return;
-    }
+    const cents = centsBetween(freq, targetFreq);
+    const rounded = Math.round(cents);
+    const closeEnough = Math.abs(cents) <= IN_TUNE_CENTS;
 
-    // Prefer cents relative to the closest guitar string, not arbitrary MIDI rounding
-    const targetFreq = STRING_FREQS[match.note];
-    const rawCents = 1200 * Math.log2(freq / targetFreq);
-    // Smooth cents separately so the needle doesn't twitch on tiny pitch noise
-    smoothedCents = smoothedCents * (1 - CENTS_SMOOTH) + rawCents * CENTS_SMOOTH;
-    const cents = Math.round(smoothedCents);
-    const { name, octave } = freqToNote(targetFreq);
+    if (closeEnough && !stale) inTuneStreak++;
+    else if (!closeEnough) inTuneStreak = 0;
+    if (target && inTuneStreak >= IN_TUNE_HOLD_FRAMES) tunedStrings.add(target);
 
-    tunerNote.innerHTML = esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + octave + "</span>";
-    tunerFreq.textContent = freq.toFixed(1) + " Hz";
+    tunerNote.innerHTML =
+      esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + esc(octave) + "</span>";
+    tunerCents.textContent = (rounded > 0 ? "+" : rounded < 0 ? "−" : "±") + Math.abs(rounded) + " ¢";
+    tunerFreq.textContent = freq.toFixed(2) + " Hz → " + targetFreq.toFixed(2) + " Hz";
 
     // Needle: map -50..+50 cents onto 0..100% of the track width
-    const clamped = Math.max(-50, Math.min(50, smoothedCents));
-    tunerNeedle.style.left = (50 + clamped) + "%";
+    tunerNeedle.style.left = 50 + Math.max(-50, Math.min(50, cents)) + "%";
 
-    const closeEnough = Math.abs(cents) <= IN_TUNE_CENTS;
-    if (closeEnough) inTuneStreak++;
-    else inTuneStreak = 0;
+    tunerNote.className = "tuner-note " + (closeEnough ? "in-tune" : "detecting") + (stale ? " stale" : "");
+    tunerCents.className = "tuner-cents " + (closeEnough ? "in-tune" : cents < 0 ? "flat" : "sharp");
+    tunerNeedle.className = "gauge-needle" + (closeEnough ? " in-tune" : "");
 
-    // Only lock a string after it stays in tune for a few frames — avoids green flash
-    if (inTuneStreak >= IN_TUNE_HOLD_FRAMES) {
-      tunedStrings.add(match.note);
-    }
-
-    const locked = tunedStrings.has(match.note);
-    tunerNote.classList.toggle("in-tune", closeEnough || locked);
-    tunerNote.classList.toggle("detecting", !(closeEnough || locked));
-    tunerNeedle.classList.toggle("in-tune", closeEnough || locked);
-
-    if (closeEnough || locked) {
+    if (!target) {
+      tunerStatus.textContent = "Not an open string — tap the one you mean";
+      tunerStatus.className = "tuner-status";
+    } else if (closeEnough) {
       const done = tunedStrings.size;
-      tunerStatus.textContent =
-        locked
-          ? "In tune ✓  ·  " + done + "/6 locked"
-          : "In tune ✓";
+      tunerStatus.textContent = done ? "In tune ✓  ·  " + done + "/6 done" : "In tune ✓";
       tunerStatus.className = "tuner-status in-tune";
     } else if (cents < 0) {
       tunerStatus.textContent = "Too flat — tune up ↑";
@@ -1400,64 +1431,132 @@
       tunerStatus.className = "tuner-status sharp";
     }
 
-    highlightStrings(match.note);
+    highlightStrings(target);
   }
 
-  // Highlight the active target string; keep already-tuned strings green
-  function highlightStrings(targetNote) {
-    tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
-      const note = btn.dataset.note;
-      const isTarget = note === targetNote;
-      const isTuned = tunedStrings.has(note);
-      btn.classList.toggle("target", isTarget && !isTuned);
-      btn.classList.toggle("in-tune", isTuned);
-      // Tiny check mark once locked so progress across all six strings is obvious
-      if (isTuned && !btn.dataset.lockedLabel) {
-        btn.dataset.lockedLabel = "1";
-        btn.setAttribute("aria-label", note + " in tune");
-      }
-    });
+  // Fold one detector estimate into the displayed pitch. Small differences are
+  // smoothed away; a genuine move to another string is confirmed over a couple
+  // of readings and then jumped to, so switching strings feels immediate.
+  function acceptReading(freq) {
+    if (!hasReading) {
+      hasReading = true;
+      smoothedLog = Math.log2(freq);
+      recentFreqs = [freq];
+      pendingFreqs = [];
+      inTuneStreak = 0;
+      return;
+    }
+
+    const jump = Math.abs(1200 * (Math.log2(freq) - smoothedLog));
+    if (jump > NEW_NOTE_CENTS) {
+      pendingFreqs.push(freq);
+      if (pendingFreqs.length > NEW_NOTE_FRAMES) pendingFreqs.shift();
+      if (pendingFreqs.length < NEW_NOTE_FRAMES) return;
+      const spread = 1200 * Math.log2(Math.max(...pendingFreqs) / Math.min(...pendingFreqs));
+      if (spread > NEW_NOTE_CENTS) return;
+      smoothedLog = Math.log2(median(pendingFreqs));
+      recentFreqs = [median(pendingFreqs)];
+      pendingFreqs = [];
+      inTuneStreak = 0;
+      return;
+    }
+
+    pendingFreqs = [];
+    recentFreqs.push(freq);
+    if (recentFreqs.length > HISTORY_LEN) recentFreqs.shift();
+
+    // Median first, so a single bad estimate cannot move the needle at all.
+    const targetLog = Math.log2(median(recentFreqs));
+    const delta = Math.abs(1200 * (targetLog - smoothedLog));
+    // Chase hard while the pitch is still moving, then settle down so the
+    // needle holds still once the string is steady.
+    const alpha = delta > 20 ? 0.6 : delta > 6 ? 0.3 : 0.12;
+    smoothedLog += (targetLog - smoothedLog) * alpha;
   }
 
   function tunerLoop() {
     if (!tunerActive) return;
-    analyser.getFloatTimeDomainData(tunerBuf);
-    const freq = detectPitch(tunerBuf, audioCtx.sampleRate);
-    renderTuner(freq);
     tunerRAF = requestAnimationFrame(tunerLoop);
+
+    const now = performance.now();
+    if (now - lastAnalysisAt < TUNER_INTERVAL_MS) return;
+    lastAnalysisAt = now;
+
+    analyser.getFloatTimeDomainData(tunerBuf);
+    const result = detector.detect(tunerBuf);
+
+    // Input level, so it is obvious at a glance whether the mic hears anything
+    const db = result.rms > 0 ? 20 * Math.log10(result.rms) : -100;
+    tunerLevelFill.style.width = Math.max(0, Math.min(100, (db + 60) * (100 / 55))) + "%";
+
+    if (result.frequency > 0 && result.clarity >= (hasReading ? HELD_CLARITY : MIN_CLARITY)) {
+      lastGoodAt = now;
+      acceptReading(result.frequency);
+      renderReading(false);
+      return;
+    }
+
+    if (!hasReading) {
+      renderWaiting();
+    } else if (now - lastGoodAt > HOLD_MS) {
+      // The note has died away — go back to waiting rather than leaving a
+      // stale "in tune" claim on screen.
+      clearReading();
+      renderWaiting();
+    } else {
+      renderReading(true);
+    }
   }
 
   async function startTuner() {
     tunerMsg.textContent = "";
     tunerMsg.className = "tuner-msg";
     try {
-      // Request the mic — this is the only permission the tuner needs
+      // Request the mic — this is the only permission the tuner needs. The
+      // browser's voice processing would wreck the pitch, so it is all off.
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, autoGainControl: false, noiseSuppression: false },
+        audio: {
+          echoCancellation: false,
+          autoGainControl: false,
+          noiseSuppression: false,
+          channelCount: 1,
+        },
       });
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       // iOS starts the context suspended until a user gesture resumes it
       if (audioCtx.state === "suspended") await audioCtx.resume();
+
       const source = audioCtx.createMediaStreamSource(micStream);
       analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 4096; // more samples → steadier low-string detection
-      tunerBuf = new Float32Array(analyser.fftSize);
-      source.connect(analyser);
+      analyser.fftSize = TUNER_FRAME;
 
-      smoothedFreq = 0;
-      smoothedCents = 0;
-      recentFreqs = [];
-      inTuneStreak = 0;
+      // Keep only the band the strings live in: below 60 Hz is mains hum and
+      // handling rumble, above 1 kHz is pick attack and fret noise. Web Audio
+      // takes Q in dB for these types, so -3.01 dB is a flat Butterworth, and
+      // two of each gives a steep enough slope to matter.
+      let node = source;
+      for (const [type, hz] of [["highpass", 60], ["highpass", 60], ["lowpass", 1000], ["lowpass", 1000]]) {
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = type;
+        filter.frequency.value = hz;
+        filter.Q.value = -3.0103;
+        node.connect(filter);
+        node = filter;
+      }
+      node.connect(analyser);
+
+      tunerBuf = new Float32Array(analyser.fftSize);
+      detector = new PitchDetector(audioCtx.sampleRate, analyser.fftSize);
+
+      clearReading();
+      lastAnalysisAt = 0;
       tunedStrings = new Set();
-      tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
-        delete btn.dataset.lockedLabel;
-        btn.classList.remove("target", "in-tune");
-      });
+      highlightStrings(null);
 
       tunerActive = true;
       tunerToggle.textContent = "Stop tuner";
       tunerToggle.classList.add("active");
-      tunerFreq.textContent = "Listening…";
+      renderWaiting();
       if (window.Analytics) window.Analytics.track("tuner-start");
       tunerLoop();
     } catch (err) {
@@ -1474,30 +1573,42 @@
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
     analyser = null;
-    smoothedFreq = 0;
-    smoothedCents = 0;
-    recentFreqs = [];
-    inTuneStreak = 0;
+    detector = null;
+    tunerBuf = null;
+    clearReading();
     tunedStrings = new Set();
     tunerToggle.textContent = "Start tuner";
     tunerToggle.classList.remove("active");
-    tunerNote.textContent = "—";
-    tunerNote.className = "tuner-note";
-    tunerFreq.textContent = "Tap start & play a string";
-    tunerStatus.textContent = "—";
-    tunerStatus.className = "tuner-status";
-    tunerNeedle.style.left = "50%";
-    tunerNeedle.classList.remove("in-tune");
-    tunerStringsEl.querySelectorAll(".tuner-string").forEach((btn) => {
-      delete btn.dataset.lockedLabel;
-      btn.classList.remove("target", "in-tune");
-    });
+    tunerLevelFill.style.width = "0%";
+    renderWaiting();
+  }
+
+  function setTuning(id) {
+    const tuning = TUNINGS.find((t) => t.id === id);
+    if (!tuning || tuning === activeTuning) return;
+    activeTuning = tuning;
+    pinnedNote = null;
+    tunedStrings = new Set();
+    clearReading();
+    try { localStorage.setItem(TUNING_KEY, tuning.id); } catch (e) { /* private mode */ }
+    renderTunerStrings();
+    updateHint();
+    renderWaiting();
   }
 
   function openTuner() {
     showView(tunerView);
     if (window.Analytics) window.Analytics.track("tuner-open");
   }
+
+  (function initTuner() {
+    let saved = null;
+    try { saved = localStorage.getItem(TUNING_KEY); } catch (e) { /* private mode */ }
+    activeTuning = TUNINGS.find((t) => t.id === saved) || TUNINGS[0];
+    buildTuningOptions();
+    renderTunerStrings();
+    updateHint();
+  })();
 
   // ── Event Wiring ──
   addSongBtn.addEventListener("click", () => openEditor(null));
@@ -1519,6 +1630,19 @@
   tunerBtn.addEventListener("click", openTuner);
   tunerBackBtn.addEventListener("click", () => { stopTuner(); showView(libraryView); });
   tunerToggle.addEventListener("click", () => { tunerActive ? stopTuner() : startTuner(); });
+  tunerTuningSelect.addEventListener("change", () => setTuning(tunerTuningSelect.value));
+
+  // Tapping a string locks the tuner to it, which is the only way to tune a
+  // string that starts out closer to one of its neighbours.
+  tunerStringsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".tuner-string");
+    if (!btn) return;
+    pinnedNote = pinnedNote === btn.dataset.note ? null : btn.dataset.note;
+    inTuneStreak = 0;
+    updateHint();
+    if (hasReading) renderReading(false);
+    else highlightStrings(pinnedNote);
+  });
 
   scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });  scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
   scrollFaster.addEventListener("click", () => { speed = Math.min(50, speed + 1); updateSpeedLabel(); });
