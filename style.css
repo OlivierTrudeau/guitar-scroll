@@ -295,6 +295,14 @@ html, body {
   border-color: var(--accent);
   color: #fff;
 }
+.song-count {
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 20px 0;
+  margin: 0;
+  flex-shrink: 0;
+}
 .no-results {
   text-align: center;
   color: var(--text2);

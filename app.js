@@ -9,6 +9,7 @@
   const editView = $("#edit-view");
   const playerView = $("#player-view");
   const songListEl = $("#song-list");
+  const songCountEl = $("#song-count");
   const emptyState = $("#empty-state");
   const addSongBtn = $("#add-song-btn");
   const calendarBtn = $("#calendar-btn");
@@ -190,6 +191,16 @@
     return `<span class="prof-badge level-${level}">${stars} <span class="prof-text">${labels[level]}</span></span>`;
   }
 
+  // "3 songs" normally, "3 of 12 songs" once a search or rating narrows the list.
+  function renderSongCount(shown) {
+    songCountEl.hidden = !songs.length;
+    if (!songs.length) return;
+    const narrowed = Boolean(searchQuery) || activeFilterLevel !== "all";
+    songCountEl.textContent = narrowed
+      ? `${shown} of ${songs.length} ${songs.length === 1 ? "song" : "songs"}`
+      : `${shown} ${shown === 1 ? "song" : "songs"}`;
+  }
+
   function renderLibrary() {
     songListEl.innerHTML = "";
     const filtered = getFilteredSongs();
@@ -197,6 +208,7 @@
     const hasResults = filtered.length > 0;
 
     emptyState.style.display = hasAnySongs ? "none" : "flex";
+    renderSongCount(filtered.length);
 
     if (hasAnySongs && !hasResults) {
       const noResults = document.createElement("div");
