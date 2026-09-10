@@ -1343,6 +1343,7 @@
       btn.classList.toggle("target", note === targetNote);
       btn.classList.toggle("in-tune", tunedStrings.has(note));
       btn.classList.toggle("pinned", note === pinnedNote);
+      btn.setAttribute("aria-pressed", note === pinnedNote ? "true" : "false");
     });
   }
 
@@ -1560,8 +1561,13 @@
       if (window.Analytics) window.Analytics.track("tuner-start");
       tunerLoop();
     } catch (err) {
-      // Most common cause: user denied mic access or no mic present
-      tunerMsg.textContent = "Microphone access is needed for the tuner. Please allow it and try again.";
+      // getUserMedia may well have succeeded before whatever failed, so let
+      // stopTuner release the mic rather than leaving it open and recording.
+      stopTuner();
+      const denied = err && (err.name === "NotAllowedError" || err.name === "SecurityError");
+      tunerMsg.textContent = denied
+        ? "Microphone access is needed for the tuner. Please allow it and try again."
+        : "Could not start the tuner: " + ((err && err.message) || "no microphone found");
       tunerMsg.className = "tuner-msg error";
     }
   }

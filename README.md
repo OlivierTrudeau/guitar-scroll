@@ -35,6 +35,22 @@ python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
+## Tuner
+
+The tuner runs entirely offline: the microphone goes through a 60–1000 Hz
+band-pass and then `pitch.js`, which estimates the pitch with the McLeod Pitch
+Method. `app.js` turns that stream of estimates into the readout, and picks
+which string of the selected tuning you are aiming at.
+
+`test_pitch.js` checks the detector against synthesised plucked-string signals
+— realistic inharmonicity, weak or missing fundamentals, room noise, mains
+hum, long decays, other capture rates — and fails if any of them drift beyond
+a few cents:
+
+```bash
+node test_pitch.js
+```
+
 ## Push changes
 
 ```bash
@@ -44,9 +60,10 @@ git add . && git commit -m "message" && git push
 Because the app is hosted on GitHub Pages, every `git push` updates the live
 site for everyone automatically. The one catch: the app is a PWA and its service
 worker (`sw.js`) caches files, so returning visitors keep the old version until
-the cache changes. Whenever you change `index.html`, `app.js`, `style.css`, or
-`analytics.js`, bump `CACHE_NAME` in `sw.js` (e.g. `guitarscroll-v12` →
-`guitarscroll-v13`) so everyone reliably picks up the new files.
+the cache changes. Whenever you change `index.html`, `app.js`, `pitch.js`,
+`style.css`, or `analytics.js`, bump `CACHE_NAME` in `sw.js` (e.g.
+`guitarscroll-v12` → `guitarscroll-v13`) so everyone reliably picks up the new
+files.
 
 ## Usage tracking (analytics)
 
