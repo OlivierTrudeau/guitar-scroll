@@ -70,6 +70,8 @@
   const statsStreakEl = $("#stats-streak");
   const statsTodayEl = $("#stats-today");
   const statsCalendarEl = $("#stats-calendar");
+  const statsTimeEl = $("#stats-time");
+  const statsTimeTodayEl = $("#stats-time-today");
 
   let songs = [];
   let editingId = null;
@@ -78,6 +80,11 @@
   let speed = 10;
   let scrollRAF = null;
   let playedTimer = null;
+  let practiceSongId = null;
+  let practiceTicker = null;
+  let practiceLastTickAt = 0;
+  let practiceLastActivityAt = 0;
+  let practiceTicksSinceSave = 0;
   // A song counts as "played" only after the auto-scroller runs uninterrupted for this long
   const PLAYED_THRESHOLD_MS = 5000;
   // Songs not played within this window are flagged as "rusty" (may need practice)
@@ -115,6 +122,12 @@
         s.practiceCount = s.practiceLog.length;
         changed = true;
       }
+      // Seconds practiced, keyed by day. Nothing to backfill — sessions logged
+      // before this existed were never timed.
+      if (!s.practiceSeconds || typeof s.practiceSeconds !== "object") {
+        s.practiceSeconds = {};
+        changed = true;
+      }
     }
     if (changed) saveSongs();
   }
@@ -141,6 +154,8 @@
     [libraryView, editView, playerView, statsView, tunerView].forEach((v) => v.classList.remove("active"));
     view.classList.add("active");
     stopScroll();
+    // Leaving the player stops the practice clock and banks whatever it counted
+    if (view !== playerView) stopPracticeClock();
     // Leaving the tuner view should always release the mic
     if (view !== tunerView) stopTuner();
   }
@@ -887,6 +902,7 @@
     songContent.scrollTop = 0;
 
     showView(playerView);
+    startPracticeClock(id);
 
     // Track that a song was actually opened — key signal of real usage
     if (window.Analytics) {
@@ -968,6 +984,72 @@
       scrollRAF = requestAnimationFrame(tick);
     }
     scrollRAF = requestAnimationFrame(tick);
+  }
+
+  // ── Practice time ──
+  // The clock runs while a song is open, the app is in the foreground, and
+  // either the autoscroller is moving or the screen was touched recently. That
+  // last condition is what stops a phone left face-up on the sofa from logging
+  // an afternoon of practice.
+  const PRACTICE_IDLE_MS = 2 * 60 * 1000;
+  const PRACTICE_TICK_MS = 5000;
+  const PRACTICE_SAVE_EVERY = 6; // ticks, so roughly every 30 seconds
+
+  function notePracticeActivity() {
+    practiceLastActivityAt = Date.now();
+  }
+
+  function practiceClockRunning() {
+    if (!practiceSongId || document.hidden) return false;
+    return scrolling || Date.now() - practiceLastActivityAt < PRACTICE_IDLE_MS;
+  }
+
+  function creditPracticeTime(includeForegroundSlice) {
+    const now = Date.now();
+    const elapsed = now - practiceLastTickAt;
+    practiceLastTickAt = now;
+    const recentlyActive =
+      practiceSongId &&
+      (scrolling || now - practiceLastActivityAt < PRACTICE_IDLE_MS);
+    if (
+      elapsed <= 0 ||
+      (!includeForegroundSlice && !practiceClockRunning()) ||
+      (includeForegroundSlice && !recentlyActive)
+    ) return;
+    const song = songs.find((s) => s.id === practiceSongId);
+    if (!song) return;
+    if (!song.practiceSeconds || typeof song.practiceSeconds !== "object") {
+      song.practiceSeconds = {};
+    }
+    // A sleeping phone or a throttled tab can hand back a huge gap, so never
+    // credit more than the tick we actually watched.
+    const day = String(startOfDay(now));
+    song.practiceSeconds[day] =
+      (song.practiceSeconds[day] || 0) + Math.min(elapsed, PRACTICE_TICK_MS * 2) / 1000;
+  }
+
+  function startPracticeClock(id) {
+    stopPracticeClock();
+    practiceSongId = id;
+    practiceLastTickAt = Date.now();
+    practiceTicksSinceSave = 0;
+    notePracticeActivity();
+    practiceTicker = setInterval(() => {
+      creditPracticeTime();
+      if (++practiceTicksSinceSave >= PRACTICE_SAVE_EVERY) {
+        practiceTicksSinceSave = 0;
+        saveSongs();
+      }
+    }, PRACTICE_TICK_MS);
+  }
+
+  function stopPracticeClock() {
+    if (!practiceSongId) return;
+    creditPracticeTime();
+    clearInterval(practiceTicker);
+    practiceTicker = null;
+    practiceSongId = null;
+    saveSongs();
   }
 
   function stopScroll() {
@@ -1125,6 +1207,32 @@
     return `<span class="practice-badge">🎸 ${n}×</span>`;
   }
 
+  // Seconds practised per day, summed across every song
+  function practiceSecondsByDay() {
+    const seconds = new Map();
+    for (const s of songs) {
+      if (!s.practiceSeconds || typeof s.practiceSeconds !== "object") continue;
+      for (const [day, secs] of Object.entries(s.practiceSeconds)) {
+        const key = Number(day);
+        if (!Number.isFinite(key) || !Number.isFinite(secs)) continue;
+        seconds.set(key, (seconds.get(key) || 0) + secs);
+      }
+    }
+    return seconds;
+  }
+
+  // "45m", "2h 10m", "3h" — hours only once there is an hour to show
+  function formatPracticeTime(seconds) {
+    const total = Math.round(seconds || 0);
+    if (total <= 0) return "0m";
+    if (total < 60) return "<1m";
+    const minutes = Math.round(total / 60);
+    if (minutes < 60) return minutes + "m";
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    return rest ? hours + "h " + rest + "m" : hours + "h";
+  }
+
   // ── Global practice calendar (streaks + heatmap) ──
   function practiceCountByDay() {
     const counts = new Map();
@@ -1150,18 +1258,26 @@
       todayCount += s.practiceLog.filter((ts) => startOfDay(ts) === today).length;
     }
 
+    const secondsByDay = practiceSecondsByDay();
+    let totalSeconds = 0;
+    for (const secs of secondsByDay.values()) totalSeconds += secs;
+
     statsStreakEl.textContent = streak;
     statsTodayEl.textContent = todayCount;
     statsTotalEl.textContent = total;
+    statsTimeEl.textContent = formatPracticeTime(totalSeconds);
+    statsTimeTodayEl.textContent = formatPracticeTime(secondsByDay.get(today) || 0) + " today";
     statsStreakEl.parentElement.classList.toggle("active", streak > 0);
 
-    renderCalendar(practiceCountByDay());
+    renderCalendar(practiceCountByDay(), secondsByDay);
     showView(statsView);
     if (window.Analytics) window.Analytics.track("stats-open");
   }
 
-  // Renders a GitHub-style heatmap for roughly the last ~18 weeks of practice
-  function renderCalendar(dayCounts) {
+  // Renders a GitHub-style heatmap for roughly the last ~18 weeks of practice.
+  // Shading still goes by session count: days practised before the app started
+  // timing sessions have no seconds recorded and would otherwise go blank.
+  function renderCalendar(dayCounts, daySeconds) {
     const WEEKS = 18;
     const oneDay = 24 * 60 * 60 * 1000;
     statsCalendarEl.innerHTML = "";
@@ -1187,9 +1303,11 @@
         else if (count === 1) lvl = "lvl-1";
         cell.className = "cal-cell " + lvl;
         const d = new Date(dayTs);
-        cell.title =
-          d.toLocaleDateString() +
-          (count ? ` — ${count} session${count === 1 ? "" : "s"}` : "");
+        const secs = daySeconds ? daySeconds.get(dayTs) || 0 : 0;
+        let label = d.toLocaleDateString();
+        if (count) label += ` — ${count} session${count === 1 ? "" : "s"}`;
+        if (secs > 0) label += ` · ${formatPracticeTime(secs)}`;
+        cell.title = label;
       }
       statsCalendarEl.appendChild(cell);
     }
@@ -1682,6 +1800,34 @@
     updateHint();
     if (hasReading) renderReading(false);
     else highlightStrings(pinnedNote);
+  });
+
+  // Anything the player is touched with counts as still practising; without
+  // this the clock would stop on anyone reading a slow passage without
+  // autoscroll running.
+  playerView.addEventListener("pointerdown", notePracticeActivity);
+  playerView.addEventListener("keydown", notePracticeActivity);
+  songContent.addEventListener("scroll", notePracticeActivity, { passive: true });
+
+  // Bank the time before the app can be frozen or closed on us
+  document.addEventListener("visibilitychange", () => {
+    if (!practiceSongId) return;
+    if (document.hidden) {
+      // `document.hidden` is already true by the time this event runs, so
+      // explicitly bank the active slice since the last tick.
+      creditPracticeTime(true);
+      saveSongs();
+    } else {
+      // Don't credit the stretch the app spent in the background
+      practiceLastTickAt = Date.now();
+      notePracticeActivity();
+    }
+  });
+  window.addEventListener("pagehide", () => {
+    if (!practiceSongId) return;
+    // visibilitychange already banked the final foreground slice when present.
+    if (!document.hidden) creditPracticeTime();
+    saveSongs();
   });
 
   scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });  scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
