@@ -164,33 +164,26 @@
     <div id="tuner-view" class="view">
       <header class="top-bar">
         <button id="tuner-back-btn" class="icon-btn" aria-label="Back">←</button>
-        <h1>Tuner</h1>
+        <h1>Tuner <span class="tuner-version">v2</span></h1>
         <select id="tuner-tuning" class="tuner-tuning" aria-label="Tuning"></select>
       </header>
       <div class="tuner-body">
-        <!-- Big note readout, signed cents offset, measured pitch -->
-        <div class="tuner-note-wrap">
-          <div id="tuner-note" class="tuner-note">—</div>
-          <div id="tuner-cents" class="tuner-cents"></div>
-          <div id="tuner-freq" class="tuner-freq">Tap start & play a string</div>
-        </div>
-
-        <!-- Needle gauge: center = in tune, left = flat, right = sharp -->
-        <div class="tuner-gauge">
-          <div class="gauge-ticks">
-            <span class="tick tick-edge">-50</span>
-            <span class="tick">-25</span>
-            <span class="tick tick-center">0</span>
-            <span class="tick">+25</span>
-            <span class="tick tick-edge">+50</span>
+        <!-- Dial: pointer swings left when flat, right when sharp, and the
+             whole thing turns green inside the target zone at the top -->
+        <div id="tuner-dial" class="tuner-dial">
+          <svg class="dial-svg" viewBox="0 0 320 172" aria-hidden="true">
+            <path class="dial-arc" d="M 17.34 138.65 A 150 150 0 0 1 302.66 138.65" />
+            <path class="dial-zone" d="M 144.94 35.76 A 150 150 0 0 1 175.06 35.76" />
+            <g id="dial-ticks" class="dial-ticks"></g>
+          </svg>
+          <div id="tuner-needle" class="dial-needle"><span class="dial-needle-tip"></span></div>
+          <div class="dial-readout">
+            <div id="tuner-note" class="tuner-note">—</div>
+            <div id="tuner-cents" class="tuner-cents"></div>
           </div>
-          <div class="gauge-track">
-            <div class="gauge-band"></div>
-            <div class="gauge-center-line"></div>
-            <div id="tuner-needle" class="gauge-needle"></div>
-          </div>
-          <div id="tuner-status" class="tuner-status">—</div>
         </div>
+        <div id="tuner-freq" class="tuner-freq">Tap start &amp; play a string</div>
+        <div id="tuner-status" class="tuner-status">—</div>
 
         <!-- Reference strings for the chosen tuning; tap one to lock onto it -->
         <div class="tuner-strings"></div>

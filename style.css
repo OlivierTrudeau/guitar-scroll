@@ -647,6 +647,18 @@ html, body {
   max-width: 45%;
   cursor: pointer;
 }
+.tuner-version {
+  display: inline-block;
+  vertical-align: 2px;
+  margin-left: 2px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
 .tuner-body {
   flex: 1;
   overflow-y: auto;
@@ -654,15 +666,90 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 22px;
-  padding: 24px 20px calc(24px + var(--safe-bottom));
+  gap: 14px;
+  padding: 16px 20px calc(24px + var(--safe-bottom));
 }
-.tuner-note-wrap {
+
+/* ── Tuner dial ── */
+.tuner-dial {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 320 / 172;
+  flex-shrink: 0;
+}
+/* Older iOS Safari has no aspect-ratio; the padding trick keeps the dial
+   proportional there so the pointer still lines up with the notches. */
+@supports not (aspect-ratio: 1) {
+  .tuner-dial { height: 0; padding-bottom: 53.75%; }
+}
+.dial-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.dial-arc {
+  fill: none;
+  stroke: var(--surface2);
+  stroke-width: 13;
+  stroke-linecap: round;
+  transition: stroke .2s;
+}
+/* The ±4 cent window at the top of the dial you are aiming the pointer into */
+.dial-zone {
+  fill: none;
+  stroke: #46d17a;
+  stroke-width: 13;
+  stroke-linecap: butt;
+  opacity: .5;
+}
+/* Notches cut across the band, drawn in the page colour */
+.dial-tick {
+  stroke: var(--bg);
+  stroke-width: 2.5;
+}
+.dial-tick.major { stroke-width: 5; }
+
+/* Pointer riding just inside the band, rotated about the dial centre */
+/* The dial centre sits just below the box, so the pointer pivots from there */
+.dial-needle {
+  position: absolute;
+  left: 50%;
+  bottom: -7.56%;
+  width: 0;
+  height: 82.56%;
+  transform: rotate(0deg);
+  transform-origin: 50% 100%;
+  transition: transform .09s ease-out;
+}
+.dial-needle-tip {
+  position: absolute;
+  top: 0;
+  left: -8px;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 20px solid var(--chord);
+  transition: border-bottom-color .2s;
+}
+.tuner-dial.in-tune .dial-arc { stroke: rgba(70, 209, 122, 0.28); }
+.tuner-dial.in-tune .dial-needle-tip { border-bottom-color: #46d17a; }
+/* Dimmed while the last note fades out and no fresh pitch is coming in */
+.tuner-dial.stale { opacity: .45; }
+
+.dial-readout {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 46.5%;
   text-align: center;
-  margin-top: 8px;
+  pointer-events: none;
 }
 .tuner-note {
-  font-size: 88px;
+  font-size: 46px;
   font-weight: 800;
   line-height: 1;
   color: var(--text2);
@@ -671,14 +758,12 @@ html, body {
 /* In-tune note glows green; off-pitch note uses the accent gold */
 .tuner-note.in-tune { color: #46d17a; }
 .tuner-note.detecting { color: var(--chord); }
-/* Dimmed while the last note fades out and no fresh pitch is coming in */
-.tuner-note.stale { opacity: .4; }
 .tuner-cents {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   line-height: 1;
-  margin-top: 6px;
-  min-height: 20px;
+  margin-top: 8px;
+  min-height: 19px;
   color: var(--text2);
   font-variant-numeric: tabular-nums;
 }
@@ -687,64 +772,11 @@ html, body {
 .tuner-freq {
   font-size: 13px;
   color: var(--text2);
-  margin-top: 8px;
   font-variant-numeric: tabular-nums;
+  margin-top: -4px;
 }
-
-.tuner-gauge {
-  width: 100%;
-  max-width: 420px;
-}
-.gauge-ticks {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--text2);
-  margin-bottom: 6px;
-  font-variant-numeric: tabular-nums;
-}
-.tick-center { color: #46d17a; font-weight: 700; }
-.gauge-track {
-  position: relative;
-  height: 56px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-/* The window that counts as in tune, ±3 cents on a ±50 cent track */
-.gauge-band {
-  position: absolute;
-  left: 47%;
-  width: 6%;
-  top: 0;
-  bottom: 0;
-  background: rgba(70, 209, 122, 0.14);
-}
-.gauge-center-line {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: rgba(70, 209, 122, 0.5);
-  transform: translateX(-50%);
-}
-.gauge-needle {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 50%;
-  width: 4px;
-  border-radius: 2px;
-  background: var(--chord);
-  transform: translateX(-50%);
-  transition: left .08s ease-out, background .15s;
-}
-.gauge-needle.in-tune { background: #46d17a; }
 .tuner-status {
   text-align: center;
-  margin-top: 10px;
   font-size: 15px;
   font-weight: 600;
   color: var(--text2);

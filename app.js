@@ -50,7 +50,9 @@
   const tunerNote = $("#tuner-note");
   const tunerCents = $("#tuner-cents");
   const tunerFreq = $("#tuner-freq");
+  const tunerDial = $("#tuner-dial");
   const tunerNeedle = $("#tuner-needle");
+  const dialTicks = $("#dial-ticks");
   const tunerStatus = $("#tuner-status");
   const tunerMsg = $("#tuner-msg");
   const tunerHint = $("#tuner-hint");
@@ -1245,6 +1247,14 @@
   // let the player pin the string they meant.
   const STRING_RANGE_CENTS = 150;
 
+  // Dial geometry, in the units of the SVG viewBox in index.html. The pointer
+  // swings DIAL_SWEEP_DEG either side of straight up over ±DIAL_RANGE_CENTS.
+  const DIAL_CX = 160;
+  const DIAL_CY = 185;
+  const DIAL_R = 150;
+  const DIAL_SWEEP_DEG = 72;
+  const DIAL_RANGE_CENTS = 50;
+
   let audioCtx = null;
   let analyser = null;
   let micStream = null;
@@ -1311,6 +1321,36 @@
     return bestDist <= STRING_RANGE_CENTS ? best : null;
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function dialPoint(cents, radius) {
+    const angle = (cents / DIAL_RANGE_CENTS) * DIAL_SWEEP_DEG * (Math.PI / 180);
+    return { x: DIAL_CX + Math.sin(angle) * radius, y: DIAL_CY - Math.cos(angle) * radius };
+  }
+
+  // Notches cut across the arc band every 5 cents, wider ones every 25. Zero
+  // gets no notch — the green target zone already marks it.
+  function buildDial() {
+    dialTicks.textContent = "";
+    for (let c = -DIAL_RANGE_CENTS; c <= DIAL_RANGE_CENTS; c += 5) {
+      if (c === 0) continue;
+      const inner = dialPoint(c, 142);
+      const outer = dialPoint(c, 158);
+      const tick = document.createElementNS(SVG_NS, "line");
+      tick.setAttribute("class", "dial-tick" + (c % 25 === 0 ? " major" : ""));
+      tick.setAttribute("x1", inner.x.toFixed(2));
+      tick.setAttribute("y1", inner.y.toFixed(2));
+      tick.setAttribute("x2", outer.x.toFixed(2));
+      tick.setAttribute("y2", outer.y.toFixed(2));
+      dialTicks.appendChild(tick);
+    }
+  }
+
+  function pointNeedle(cents) {
+    const clamped = Math.max(-DIAL_RANGE_CENTS, Math.min(DIAL_RANGE_CENTS, cents));
+    tunerNeedle.style.transform = "rotate(" + (clamped / DIAL_RANGE_CENTS) * DIAL_SWEEP_DEG + "deg)";
+  }
+
   function buildTuningOptions() {
     tunerTuningSelect.innerHTML = "";
     for (const tuning of TUNINGS) {
@@ -1371,8 +1411,8 @@
     tunerFreq.textContent = tunerActive ? "Play a string…" : "Tap start & play a string";
     tunerStatus.textContent = "—";
     tunerStatus.className = "tuner-status";
-    tunerNeedle.style.left = "50%";
-    tunerNeedle.className = "gauge-needle";
+    tunerDial.className = "tuner-dial";
+    pointNeedle(0);
     highlightStrings(pinnedNote);
   }
 
@@ -1409,13 +1449,11 @@
       esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + esc(octave) + "</span>";
     tunerCents.textContent = (rounded > 0 ? "+" : rounded < 0 ? "−" : "±") + Math.abs(rounded) + " ¢";
     tunerFreq.textContent = freq.toFixed(2) + " Hz → " + targetFreq.toFixed(2) + " Hz";
+    pointNeedle(cents);
 
-    // Needle: map -50..+50 cents onto 0..100% of the track width
-    tunerNeedle.style.left = 50 + Math.max(-50, Math.min(50, cents)) + "%";
-
-    tunerNote.className = "tuner-note " + (closeEnough ? "in-tune" : "detecting") + (stale ? " stale" : "");
+    tunerNote.className = "tuner-note " + (closeEnough ? "in-tune" : "detecting");
     tunerCents.className = "tuner-cents " + (closeEnough ? "in-tune" : cents < 0 ? "flat" : "sharp");
-    tunerNeedle.className = "gauge-needle" + (closeEnough ? " in-tune" : "");
+    tunerDial.className = "tuner-dial" + (closeEnough ? " in-tune" : "") + (stale ? " stale" : "");
 
     if (!target) {
       tunerStatus.textContent = "Not an open string — tap the one you mean";
@@ -1611,6 +1649,7 @@
     let saved = null;
     try { saved = localStorage.getItem(TUNING_KEY); } catch (e) { /* private mode */ }
     activeTuning = TUNINGS.find((t) => t.id === saved) || TUNINGS[0];
+    buildDial();
     buildTuningOptions();
     renderTunerStrings();
     updateHint();
