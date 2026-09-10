@@ -313,31 +313,54 @@
     return n + suf + " fret";
   }
 
+  // Ultimate Guitar encodes each slot of the strumming grid as
+  // arrow * 100 + kind, where arrow is 0 for down, 1 for up and 2 for no
+  // arrow at all, and kind is 1 for a plain stroke, 2 for a muted one (an x
+  // drawn over the arrow) and 3 for an accented one (a > over the arrow).
+  // When there is no arrow the kind picks the glyph instead: 201 is a
+  // percussive mute, 202 an unused slot and 203 a rest.
   function decodeStrumCode(code) {
     const n = parseInt(code, 10);
-    if (Number.isNaN(n)) return "?";
-    // UG packs stroke type in the low digits; 2xx ≈ rest / empty slot
-    const hundreds = Math.floor(n / 100);
+    if (Number.isNaN(n)) return "-";
+    const arrow = Math.floor(n / 100);
     const kind = n % 100;
-    if (hundreds === 2) return "-";
-    if (kind === 1) return "D";
-    if (kind === 2) return "U";
-    if (kind === 3) return "X";
-    return "?";
+    if (arrow === 2) return kind === 1 ? "X" : "-";
+    if (kind === 2) return "X";
+    return arrow === 1 ? "U" : "D";
+  }
+
+  // A sixteenth-note grid reads far better as "D-DU -U-U" than as sixteen
+  // loose characters, so split it back into beats.
+  function groupStrokesIntoBeats(strokes, denominator, isTriplet) {
+    const den = parseInt(denominator, 10);
+    const perBeat = isTriplet ? 3 : Number.isFinite(den) ? den / 4 : 0;
+    if (!Number.isInteger(perBeat) || perBeat < 2) return strokes.join(" ");
+    const beats = [];
+    for (let i = 0; i < strokes.length; i += perBeat) {
+      beats.push(strokes.slice(i, i + perBeat).join(""));
+    }
+    return beats.join(" ");
   }
 
   function formatStrumming(strummings) {
-    if (!Array.isArray(strummings) || !strummings.length) return "";
-    const pat = strummings[0];
-    const measures = pat.measures || [];
-    const strokes = measures.map((m) =>
-      decodeStrumCode(typeof m === "object" && m ? m.measure : m)
-    );
-    let text = strokes.join(" ").replace(/\s+/g, " ").trim();
-    const part = (pat.part || "").trim();
-    const bpm = pat.bpm;
-    if (part) text = part + ": " + text;
-    if (bpm) text += " (" + bpm + " bpm)";
+    if (!Array.isArray(strummings)) return "";
+    const bpms = new Set();
+    const parts = [];
+    for (const pat of strummings) {
+      if (!pat) continue;
+      const strokes = (pat.measures || []).map((m) =>
+        decodeStrumCode(typeof m === "object" && m ? m.measure : m)
+      );
+      if (!strokes.some((s) => s !== "-")) continue;
+      let text = groupStrokesIntoBeats(strokes, pat.denuminator, pat.is_triplet);
+      const part = (pat.part || "").trim();
+      if (part) text = part + ": " + text;
+      if (pat.bpm) bpms.add(pat.bpm);
+      parts.push(text);
+    }
+    if (!parts.length) return "";
+    let text = parts.join(" · ");
+    if (bpms.size === 1) text += " (" + [...bpms][0] + " bpm)";
     return text;
   }
 
@@ -352,29 +375,6 @@
     } catch {
       return [];
     }
-  }
-
-  // UG strumming CSS-module class map (from their tab page bundle)
-  function strokeFromBeatClass(className) {
-    const c = String(className || "").split(/\s+/);
-    if (c.includes("djwky")) return "-"; // realPause
-    if (c.includes("l4MMU") || c.includes("Pp3D7")) return "X"; // mute / palm mute
-    if (c.includes("vaSS9")) return "U"; // up
-    if (c.includes("-u97C")) return "D"; // down
-    return "-";
-  }
-
-  function parseStrumFromRenderedHtml(htmlText) {
-    const sections = htmlText.match(/<section class="V2Y9h">[\s\S]*?<\/section>/g) || [];
-    if (!sections.length) return "";
-    const sec = sections[0];
-    const cells = [...sec.matchAll(/<div class="([^"]*)">/g)].map((m) => m[1]);
-    if (!cells.length) return "";
-    const strokes = cells.map(strokeFromBeatClass);
-    let text = strokes.join(" ").replace(/\s+/g, " ").trim();
-    const bpmMatch = htmlText.match(/(\d+)\s*bpm/i);
-    if (bpmMatch) text += " (" + bpmMatch[1] + " bpm)";
-    return text;
   }
 
   function stripHtmlToText(htmlChunk) {
@@ -446,7 +446,7 @@
       artist,
       capo,
       tuning,
-      strum: parseStrumFromRenderedHtml(htmlText),
+      strum: "",
       body,
     };
   }
@@ -482,14 +482,12 @@
       throw new Error("No free chord sheet on that link (official/pro tabs aren't supported).");
     }
     const tuning = meta.tuning || {};
-    // Prefer rendered-class decode when available in same HTML; else packed measures
-    const renderedStrum = parseStrumFromRenderedHtml(htmlText);
     return {
       title: tab.song_name || "",
       artist: tab.artist_name || "",
       capo: formatCapo(meta.capo),
       tuning: tuning.value || tuning.name || "",
-      strum: renderedStrum || formatStrumming(strummingsFromTabView(tv)),
+      strum: formatStrumming(strummingsFromTabView(tv)),
       body: cleanUgBody(content),
     };
   }
@@ -560,7 +558,23 @@
     }
   }
 
-  // Jina HTML: reliable CORS + rendered strumming pattern classes + chord sheet
+  // These proxies hand back Ultimate Guitar's own server response, which still
+  // carries the js-store JSON: chord sheet, capo, tuning and the numeric
+  // strumming codes. Reader services return the page after React has hydrated
+  // it, and by then that JSON is gone, so they can only recover the chords.
+  // Each proxy is individually flaky, so they all run at once.
+  const UG_HTML_PROXIES = [
+    (url) => "https://proxy.corsfix.com/?" + url,
+    (url) => "https://cors.eu.org/" + url,
+    (url) => "https://api.cors.lol/?url=" + encodeURIComponent(url),
+    (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+  ];
+
+  async function fetchSongFromHtmlProxy(url, buildProxyUrl) {
+    const htmlText = await fetchText(buildProxyUrl(url), { timeout: 25000 });
+    return parseUgJsStore(htmlText);
+  }
+
   async function fetchSongFromJinaHtml(url) {
     const raw = await fetchText("https://r.jina.ai/" + url, {
       timeout: 40000,
@@ -583,30 +597,23 @@
     return parseUgMarkdown(data.title || "", data.content);
   }
 
-  // allorigins sometimes has raw js-store (incl. strumming), but is flaky/CORS-fragile
-  async function fetchSongFromAllOrigins(url) {
-    const encoded = encodeURIComponent(url);
-    const endpoints = [
-      "https://api.allorigins.win/get?url=" + encoded,
-      "https://api.allorigins.win/raw?url=" + encoded,
-    ];
-    let lastErr = null;
-    for (const endpoint of endpoints) {
-      try {
-        const text = await fetchText(endpoint, { timeout: 20000 });
-        let htmlText = text;
-        if (endpoint.includes("/get?")) {
-          const payload = JSON.parse(text);
-          htmlText = payload.contents || "";
-        }
-        if (htmlText && htmlText.includes("js-store")) {
-          return parseUgJsStore(htmlText);
-        }
-      } catch (err) {
-        lastErr = err;
-      }
+  // Resolves with the first attempt to come back with a usable song, or null
+  // once every one of them has failed.
+  async function firstUsableSong(attempts, errors) {
+    const settled = attempts.map((promise, i) =>
+      promise.then(
+        (song) => ({ i, song }),
+        (err) => ({ i, err })
+      )
+    );
+    const pending = new Set(settled);
+    while (pending.size) {
+      const result = await Promise.race(pending);
+      pending.delete(settled[result.i]);
+      if (result.song && result.song.body) return result.song;
+      if (result.err && result.err.message) errors.push(result.err.message);
     }
-    throw lastErr || new Error("Could not load tab HTML");
+    return null;
   }
 
   async function importFromUltimateGuitar(rawUrl) {
@@ -615,54 +622,24 @@
       throw new Error("Paste a full Ultimate Guitar tab link (tabs.ultimate-guitar.com/tab/…).");
     }
 
-    // Primary: Jina HTML (CORS-friendly, includes strumming UI classes)
-    // Fallback: Jina markdown (body/meta only)
-    // Optional: allorigins js-store if it happens to work
-    const htmlAttempt = fetchSongFromJinaHtml(url);
-    const mdAttempt = fetchSongFromJinaMarkdown(url);
-    const aoAttempt = fetchSongFromAllOrigins(url);
+    const errors = [];
+    const fromHtml = await firstUsableSong(
+      UG_HTML_PROXIES.map((build) => fetchSongFromHtmlProxy(url, build)),
+      errors
+    );
+    if (fromHtml) return fromHtml;
 
-    const wrap = (promise, src) =>
-      promise.then(
-        (song) => ({ src, song }),
-        (err) => ({ src, err })
-      );
+    // Nothing got through with the strumming attached; settle for the chords.
+    setUgStatus("Trying another source…", "progress");
+    const fromReader = await firstUsableSong(
+      [fetchSongFromJinaHtml(url), fetchSongFromJinaMarkdown(url)],
+      errors
+    );
+    if (fromReader) return fromReader;
 
-    const htmlWrapped = wrap(htmlAttempt, "html");
-    const mdWrapped = wrap(mdAttempt, "md");
-    const aoWrapped = wrap(aoAttempt, "ao");
-
-    // Prefer first success that includes strumming; otherwise first success with body
-    const results = [];
-    const pushResult = (r) => {
-      if (r && r.song && r.song.body) results.push(r);
-    };
-
-    const first = await Promise.race([htmlWrapped, mdWrapped, aoWrapped]);
-    pushResult(first);
-
-    if (first.song && first.song.strum) return first.song;
-
-    // Wait a bit for a strumming-capable result
-    setUgStatus("Extracting strumming pattern…", "progress");
-    const rest = await Promise.all([
-      first.src === "html" ? Promise.resolve(first) : htmlWrapped,
-      first.src === "md" ? Promise.resolve(first) : mdWrapped,
-      first.src === "ao" ? Promise.resolve(first) : aoWrapped,
-    ]);
-    rest.forEach(pushResult);
-
-    const withStrum = results.find((r) => r.song && r.song.strum);
-    if (withStrum) return withStrum.song;
-    if (results.length) return results[0].song;
-
-    const errMsg =
-      [first, ...rest]
-        .map((r) => r && r.err && r.err.message)
-        .filter(Boolean)[0] || "";
     throw new Error(
       "Couldn't fetch that tab (network/proxy). Try again, or paste the chords manually." +
-        (errMsg ? " (" + errMsg + ")" : "")
+        (errors.length ? " (" + errors[0] + ")" : "")
     );
   }
 
