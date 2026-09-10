@@ -65,6 +65,10 @@ the cache changes. Whenever you change `index.html`, `app.js`, `pitch.js`,
 `guitarscroll-v12` → `guitarscroll-v13`) so everyone reliably picks up the new
 files.
 
+The tuner header shows a small version badge (`.tuner-version` in
+`index.html`) so you can tell at a glance which build a phone is actually
+running. Bump it whenever the tuner itself changes noticeably.
+
 ## Usage tracking (analytics)
 
 The app reports anonymous usage so you can see how many people use it, whether
