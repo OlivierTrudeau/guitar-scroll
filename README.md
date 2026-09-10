@@ -69,6 +69,13 @@ The tuner header shows a small version badge (`.tuner-version` in
 `index.html`) so you can tell at a glance which build a phone is actually
 running. Bump it whenever the tuner itself changes noticeably.
 
+## Practice time
+
+The Practice calendar records active foreground time while a song is open.
+Autoscroll always counts; manual practice pauses after two minutes without an
+interaction. Time is stored locally on the device alongside the song library,
+and older sessions cannot be backfilled because they were never timed.
+
 ## Usage tracking (analytics)
 
 The app reports anonymous usage so you can see how many people use it, whether
