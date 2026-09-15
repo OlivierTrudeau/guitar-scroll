@@ -6,6 +6,7 @@ Usage:
     python3 add_song.py                     # interactive: prompts you to paste
     python3 add_song.py --file tab.txt      # from a saved text file
     python3 add_song.py --url URL           # fetch + parse a UG tab page
+    python3 add_song.py --speed 5           # play it at 5× autoscroll speed
     python3 add_song.py --no-push           # don't auto-push to GitHub
 
     Steps (paste mode):
@@ -30,6 +31,24 @@ from html import unescape
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SONGS_JSON = os.path.join(SCRIPT_DIR, "songs.json")
+
+# Autoscroll speed multiplier: the app dials it in when the song is opened, and
+# its controls only go from 1× to 50×.
+SPEED_RE = re.compile(r"^[x×]?\s*(\d+(?:[.,]\d+)?)\s*[x×]?$", re.I)
+MIN_SPEED = 1
+MAX_SPEED = 50
+
+
+def parse_speed(raw):
+    """Read "5", "5x" or "×1.5" as a multiplier, or return None."""
+    match = SPEED_RE.match(str(raw or "").strip())
+    if not match:
+        return None
+    n = float(match.group(1).replace(",", "."))
+    if n <= 0:
+        return None
+    n = round(min(MAX_SPEED, max(MIN_SPEED, n)), 1)
+    return int(n) if n == int(n) else n
 
 
 def format_capo(c):
@@ -105,7 +124,6 @@ def parse_ug_html(html_text):
         raise ValueError(
             "No free chord sheet on that link (official/pro tabs aren't supported)."
         )
-    tuning = meta.get("tuning") or {}
     title = tab.get("song_name") or "Untitled"
     song_id = re.sub(r"[^a-z0-9]+", "_", title.lower()).strip("_")
     return {
@@ -113,7 +131,6 @@ def parse_ug_html(html_text):
         "title": title,
         "artist": tab.get("artist_name") or "",
         "capo": format_capo(meta.get("capo")),
-        "tuning": tuning.get("value") or tuning.get("name") or "",
         "strum": format_strumming(tv.get("strummings") or []),
         "body": clean_ug_body(content),
     }
@@ -142,7 +159,6 @@ def parse_ug_paste(text):
     title = ""
     artist = ""
     capo = ""
-    tuning = ""
     strum = ""
     body_lines = []
     found_tab_start = False
@@ -163,12 +179,12 @@ def parse_ug_paste(text):
                 continue
 
         if re.match(r"^Tuning:", stripped, re.I):
+            # The app no longer keeps the tuning, but UG often hides the capo on
+            # the same line, so the line is still worth reading.
             val = re.sub(r"^Tuning:\s*", "", stripped, flags=re.I).strip()
             capo_in_tuning = re.search(r"\s*Capo:?\s*(.+)", val, re.I)
             if capo_in_tuning:
                 capo = capo_in_tuning.group(1).strip()
-                val = val[: capo_in_tuning.start()].strip()
-            tuning = val
             continue
 
         if re.match(r"^Capo:", stripped, re.I) or re.match(r"^Capo\s+\d", stripped, re.I):
@@ -207,7 +223,6 @@ def parse_ug_paste(text):
         "title": title,
         "artist": artist,
         "capo": capo,
-        "tuning": tuning,
         "strum": strum,
         "body": body,
     }
@@ -262,6 +277,13 @@ def main():
         idx = sys.argv.index("--url")
         if idx + 1 < len(sys.argv):
             from_url = sys.argv[idx + 1]
+    speed = None
+    if "--speed" in sys.argv:
+        idx = sys.argv.index("--speed")
+        speed = parse_speed(sys.argv[idx + 1] if idx + 1 < len(sys.argv) else "")
+        if speed is None:
+            print(f"--speed needs a multiplier between {MIN_SPEED} and {MAX_SPEED}, e.g. --speed 5")
+            sys.exit(1)
 
     if from_url:
         print(f"Fetching {from_url} …")
@@ -282,10 +304,13 @@ def main():
             sys.exit(1)
         song = parse_ug_paste(text)
 
+    if speed is not None:
+        song["speed"] = speed
+
     print(f"\n  Title:  {song['title']}")
     print(f"  Artist: {song['artist']}")
     print(f"  Capo:   {song['capo'] or 'none'}")
-    print(f"  Tuning: {song['tuning'] or 'standard'}")
+    print(f"  Speed:  {str(song['speed']) + '×' if song.get('speed') else 'default'}")
     print(f"  Strum:  {song.get('strum') or 'none'}")
     print(f"  Body:   {len(song['body'].split(chr(10)))} lines")
 

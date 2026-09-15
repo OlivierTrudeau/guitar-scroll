@@ -10,7 +10,7 @@ https://oliviertrudeau.github.io/guitar-scroll/
 1. Tap **＋**
 2. Paste an Ultimate Guitar link, e.g.
    `https://tabs.ultimate-guitar.com/tab/eminem/temporary-chords-5347992`
-3. Tap **Import** — title, artist, capo, tuning, strumming, and chords/lyrics fill in
+3. Tap **Import** — title, artist, capo, strumming, and chords/lyrics fill in
 4. Tap **✓** to save
 
 Works for free/public chord sheets. Official/pro tabs won't have extractable content.
@@ -26,6 +26,17 @@ python3 add_song.py
 ```
 
 Paste mode: copy the tab from Ultimate Guitar, run the script, paste, then Ctrl+D.
+
+## Speed multiplier
+
+Each song has a speed multiplier — the autoscroll speed it's meant to be played
+at. Write it in the editor as `5`, `5x` or `×1.5` (1× to 50×); opening the song
+dials the player straight to it, and songs without one open at 10×. From the CLI
+it's `--speed 5`.
+
+This field replaces the old per-song tuning. Tunings written as a speed (`5x`)
+carry over automatically the first time the app loads; real tunings are dropped,
+since nothing displayed them. The tuner's own tuning picker is unaffected.
 
 ## Run locally
 
