@@ -19,7 +19,7 @@
   const titleInput = $("#song-title-input");
   const artistInput = $("#song-artist-input");
   const capoInput = $("#song-capo-input");
-  const tuningInput = $("#song-tuning-input");
+  const speedInput = $("#song-speed-input");
   const strumInput = $("#song-strum-input");
   const bodyInput = $("#song-body-input");
   const ugUrlInput = $("#ug-url-input");
@@ -77,7 +77,10 @@
   let editingId = null;
   let currentSongId = null;
   let scrolling = false;
-  let speed = 10;
+  const MIN_SPEED = 1;
+  const MAX_SPEED = 50;
+  const DEFAULT_SPEED = 10;
+  let speed = DEFAULT_SPEED;
   let scrollRAF = null;
   let playedTimer = null;
   let practiceSongId = null;
@@ -93,6 +96,34 @@
   let activeFilterLevel = "all";
   let activeSort = "default";
   let searchQuery = "";
+
+  // ── Speed multiplier ──
+  // A song can carry the speed it's meant to be played at, which the player
+  // dials in as soon as the song is opened. It's typed by hand, so accept the
+  // shapes people actually write: "5", "5x", "×1.5".
+  const SPEED_RE = /^[x×]?\s*(\d+(?:[.,]\d+)?)\s*[x×]?$/i;
+
+  function clampSpeed(n) {
+    return Math.min(MAX_SPEED, Math.max(MIN_SPEED, Math.round(n * 10) / 10));
+  }
+
+  // Returns a usable multiplier, or null when the text isn't one.
+  function parseSpeed(raw) {
+    const match = String(raw == null ? "" : raw).trim().match(SPEED_RE);
+    if (!match) return null;
+    const n = parseFloat(match[1].replace(",", "."));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return clampSpeed(n);
+  }
+
+  function formatSpeed(n) {
+    return clampSpeed(n) + "×";
+  }
+
+  function applySpeed(n) {
+    speed = clampSpeed(n);
+    updateSpeedLabel();
+  }
 
   // ── Persistence ──
   function loadSongs() {
@@ -132,6 +163,31 @@
     if (changed) saveSongs();
   }
 
+  // The field that now holds the speed multiplier used to be the song's tuning,
+  // and people wrote things like "5x" in it. Carry those over and drop the rest,
+  // which were real tunings the app no longer shows.
+  function migrateSongSpeed() {
+    let changed = false;
+    for (const s of songs) {
+      // Hand-written libraries (songs.json, backups) can spell it out as text
+      if ("speed" in s && typeof s.speed !== "number") {
+        const parsed = parseSpeed(s.speed);
+        if (parsed === null) delete s.speed;
+        else s.speed = parsed;
+        changed = true;
+      }
+      if ("tuning" in s) {
+        if (typeof s.speed !== "number") {
+          const fromTuning = parseSpeed(s.tuning);
+          if (fromTuning !== null) s.speed = fromTuning;
+        }
+        delete s.tuning;
+        changed = true;
+      }
+    }
+    if (changed) saveSongs();
+  }
+
   function mergeSongsFromRepo() {
     return fetch("songs.json?t=" + Date.now())
       .then((r) => r.ok ? r.json() : [])
@@ -143,7 +199,10 @@
             added++;
           }
         }
-        if (added) saveSongs();
+        if (added) {
+          migrateSongSpeed();
+          saveSongs();
+        }
         return added;
       })
       .catch(() => 0);
@@ -281,7 +340,7 @@
   // ── Ultimate Guitar import ──
   // The app is static (GitHub Pages), so the browser can't fetch UG directly
   // (CORS). We try free public proxies / readers, then parse title/artist/
-  // capo/tuning/strum/body into the editor fields.
+  // capo/strum/body into the editor fields.
   const UG_URL_RE = /^https?:\/\/(?:tabs\.)?ultimate-guitar\.com\/tab\/.+/i;
   let ugProgressTimer = null;
 
@@ -457,12 +516,6 @@
       htmlText.match(/Capo:\s*<\/[^>]+>\s*<[^>]+>(?:<[^>]+>)?([^<]+)/i);
     if (capoMatch) capo = unescapeHtmlEntities(capoMatch[1]).trim();
 
-    let tuning = "";
-    const tunMatch =
-      htmlText.match(/id="tuning"[^>]*>([^<]+)</i) ||
-      htmlText.match(/Tuning:\s*<\/[^>]+>\s*<[^>]+>(?:<[^>]+>)?([^<]+)/i);
-    if (tunMatch) tuning = unescapeHtmlEntities(tunMatch[1]).trim();
-
     let body = "";
     const preMatch = htmlText.match(/<pre class="[^"]*"[^>]*>([\s\S]*?)<\/pre>/i);
     if (preMatch) body = cleanUgBody(stripHtmlToText(preMatch[1]));
@@ -472,7 +525,6 @@
       title: title || "Untitled",
       artist,
       capo,
-      tuning,
       strum: "",
       body,
     };
@@ -508,12 +560,10 @@
     if (!String(content).trim()) {
       throw new Error("No free chord sheet on that link (official/pro tabs aren't supported).");
     }
-    const tuning = meta.tuning || {};
     return {
       title: tab.song_name || "",
       artist: tab.artist_name || "",
       capo: formatCapo(meta.capo),
-      tuning: tuning.value || tuning.name || "",
       strum: formatStrumming(strummingsFromTabView(tv)),
       body: cleanUgBody(content),
     };
@@ -529,11 +579,8 @@
       song = song.slice(dash + 3).trim();
     }
     let capo = "";
-    let tuning = "";
     const capoMatch = content.match(/\|\s*Capo:\s*\|\s*([^|\n]+)/i);
     if (capoMatch) capo = capoMatch[1].trim();
-    const tunMatch = content.match(/\|\s*Tuning:\s*\|\s*(?:\[([^\]]+)\]|([^|\n]+))/i);
-    if (tunMatch) tuning = (tunMatch[1] || tunMatch[2] || "").trim();
 
     let body = "";
     const fence = content.match(/```[^\n]*\n([\s\S]*?)```/);
@@ -564,7 +611,6 @@
       title: song,
       artist,
       capo,
-      tuning,
       strum: "",
       body: cleanUgBody(body),
     };
@@ -586,7 +632,7 @@
   }
 
   // These proxies hand back Ultimate Guitar's own server response, which still
-  // carries the js-store JSON: chord sheet, capo, tuning and the numeric
+  // carries the js-store JSON: chord sheet, capo and the numeric
   // strumming codes. Reader services return the page after React has hydrated
   // it, and by then that JSON is gone, so they can only recover the chords.
   // Each proxy is individually flaky, so they all run at once.
@@ -674,7 +720,7 @@
     if (song.title) titleInput.value = song.title;
     if (song.artist) artistInput.value = song.artist;
     if (song.capo) capoInput.value = song.capo;
-    if (song.tuning) tuningInput.value = song.tuning;
+    if (song.speed) speedInput.value = String(song.speed);
     if (song.strum) strumInput.value = song.strum;
     if (song.body) bodyInput.value = song.body;
   }
@@ -717,7 +763,7 @@
     titleInput.value = song ? song.title : "";
     artistInput.value = song ? song.artist : "";
     capoInput.value = song ? song.capo : "";
-    tuningInput.value = song ? song.tuning : "";
+    speedInput.value = song && song.speed ? String(song.speed) : "";
     strumInput.value = song ? song.strum : "";
     bodyInput.value = song ? song.body : "";
     editingProficiency = song ? (song.proficiency || 0) : 0;
@@ -734,6 +780,7 @@
     const title = titleInput.value.trim();
     const body = bodyInput.value.trim();
     if (!title && !body) { showView(libraryView); renderLibrary(); return; }
+    const songSpeed = parseSpeed(speedInput.value);
     if (editingId) {
       const song = songs.find((s) => s.id === editingId);
       if (song) {
@@ -741,7 +788,7 @@
           title: title || "Untitled",
           artist: artistInput.value.trim(),
           capo: capoInput.value.trim(),
-          tuning: tuningInput.value.trim(),
+          speed: songSpeed,
           strum: strumInput.value.trim(),
           proficiency: editingProficiency,
           body,
@@ -753,7 +800,7 @@
         title: title || "Untitled",
         artist: artistInput.value.trim(),
         capo: capoInput.value.trim(),
-        tuning: tuningInput.value.trim(),
+        speed: songSpeed,
         strum: strumInput.value.trim(),
         proficiency: editingProficiency,
         body,
@@ -886,8 +933,12 @@
     playerSongTitle.textContent = song.title;
     playerSongArtist.textContent = song.artist;
 
+    // A song that knows its speed opens ready to play at it; the rest fall back
+    // to the default rather than inheriting the previous song's speed.
+    applySpeed(song.speed || DEFAULT_SPEED);
+
     songMeta.innerHTML = "";
-    if (song.tuning) songMeta.innerHTML += `<span class="meta-tag"><strong>Tuning:</strong> ${esc(song.tuning)}</span>`;
+    if (song.speed) songMeta.innerHTML += `<span class="meta-tag"><strong>Speed:</strong> ${esc(formatSpeed(song.speed))}</span>`;
     if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo:</strong> ${esc(song.capo)}</span>`;
     const rusty = isRusty(song.lastPlayed);
     songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
@@ -1062,7 +1113,7 @@
   }
 
   function updateSpeedLabel() {
-    speedLabel.textContent = speed + "×";
+    speedLabel.textContent = formatSpeed(speed);
   }
 
   // ── Auto-import raw text files ──
@@ -1071,7 +1122,6 @@
     let title = filename || "Untitled";
     let artist = "";
     let capo = "";
-    let tuning = "";
     let strum = "";
     let bodyStart = 0;
 
@@ -1085,7 +1135,6 @@
     const metaFields = firstLine.match(/(Tuning:\s*[^\s]+|Key:\s*[^\s]+|Capo:\s*[^,\n]+)/gi);
     if (metaFields) {
       for (const f of metaFields) {
-        if (/^tuning/i.test(f)) tuning = f.replace(/^tuning:\s*/i, "");
         if (/^capo/i.test(f)) capo = f.replace(/^capo:\s*/i, "");
       }
       bodyStart = 1;
@@ -1098,7 +1147,7 @@
 
     const body = lines.slice(bodyStart).join("\n").trim();
 
-    return { title, artist, capo, tuning, strum, body };
+    return { title, artist, capo, strum, body };
   }
 
   // ── Helpers ──
@@ -1830,8 +1879,9 @@
     saveSongs();
   });
 
-  scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });  scrollSlower.addEventListener("click", () => { speed = Math.max(1, speed - 1); updateSpeedLabel(); });
-  scrollFaster.addEventListener("click", () => { speed = Math.min(50, speed + 1); updateSpeedLabel(); });
+  scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });
+  scrollSlower.addEventListener("click", () => { applySpeed(speed - 1); });
+  scrollFaster.addEventListener("click", () => { applySpeed(speed + 1); });
 
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value.trim();
@@ -1935,6 +1985,7 @@
             added++;
           }
         }
+        migrateSongSpeed();
         saveSongs();
         renderLibrary();
         alert(`Import done: ${added} added, ${updated} updated.`);
@@ -1949,6 +2000,7 @@
   // ── Init ──
   loadSongs();
   migratePracticeData();
+  migrateSongSpeed();
   mergeSongsFromRepo().then(() => { renderLibrary(); });
   renderLibrary();
   syncSortUI();
