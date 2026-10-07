@@ -2,6 +2,12 @@
   "use strict";
 
   const STORAGE_KEY = "guitarscroll_songs";
+  // Practice history of songs that have been deleted, so the all-time totals
+  // stay all-time instead of shrinking with the library.
+  const PRACTICE_ARCHIVE_KEY = "guitarscroll_practice_archive";
+  // Song ids the user has deleted. mergeSongsFromRepo() would otherwise put
+  // every songs.json entry back on the next open.
+  const DELETED_SONGS_KEY = "guitarscroll_deleted_songs";
 
   // ── DOM refs ──
   const $ = (s) => document.querySelector(s);
@@ -72,8 +78,19 @@
   const statsCalendarEl = $("#stats-calendar");
   const statsTimeEl = $("#stats-time");
   const statsTimeTodayEl = $("#stats-time-today");
+  const statsTimeCard = $("#stats-time-card");
+  const practiceTimeView = $("#practice-time-view");
+  const practiceTimeBackBtn = $("#practice-time-back-btn");
+  const practiceTotalEl = $("#practice-total-time");
+  const practiceTotalSubEl = $("#practice-total-sub");
+  const practiceQuickEl = $("#practice-quick");
+  const practiceTabsEl = $("#practice-tabs");
+  const practicePeriodsEl = $("#practice-periods");
+  const practiceNoteEl = $("#practice-note");
 
   let songs = [];
+  let practiceArchive = [];
+  let deletedSongIds = new Set();
   let editingId = null;
   let currentSongId = null;
   let scrolling = false;
@@ -137,6 +154,133 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(songs));
   }
 
+  function loadPracticeArchive() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(PRACTICE_ARCHIVE_KEY));
+      practiceArchive = Array.isArray(stored) ? stored : [];
+    } catch {
+      practiceArchive = [];
+    }
+  }
+  function savePracticeArchive() {
+    try {
+      localStorage.setItem(PRACTICE_ARCHIVE_KEY, JSON.stringify(practiceArchive));
+    } catch (e) { /* private mode */ }
+  }
+
+  function loadDeletedSongIds() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(DELETED_SONGS_KEY));
+      deletedSongIds = new Set(Array.isArray(stored) ? stored : []);
+    } catch {
+      deletedSongIds = new Set();
+    }
+  }
+  function saveDeletedSongIds() {
+    try {
+      localStorage.setItem(DELETED_SONGS_KEY, JSON.stringify([...deletedSongIds]));
+    } catch (e) { /* private mode */ }
+  }
+
+  // Remember a delete so the next songs.json merge does not put the song back.
+  function rememberDeletedSong(id) {
+    if (!id || deletedSongIds.has(id)) return;
+    deletedSongIds.add(id);
+    saveDeletedSongIds();
+  }
+
+  // The user brought the song back on purpose (backup import, re-add).
+  function forgetDeletedSong(id) {
+    if (!deletedSongIds.has(id)) return;
+    deletedSongIds.delete(id);
+    saveDeletedSongIds();
+  }
+
+  // Songs already sitting in the practice archive were deleted before this
+  // denylist existed — treat them as deleted so a reopen does not resurrect them.
+  function seedDeletedIdsFromArchive() {
+    let changed = false;
+    for (const entry of practiceArchive) {
+      if (!entry || !entry.id) continue;
+      if (songs.find((s) => s.id === entry.id)) continue;
+      if (deletedSongIds.has(entry.id)) continue;
+      deletedSongIds.add(entry.id);
+      changed = true;
+    }
+    if (changed) saveDeletedSongIds();
+  }
+
+  // Deleting a song removes it from the library but not from your history: the
+  // hours you put into it still count towards the all-time totals.
+  function archiveSongPractice(song) {
+    const seconds = song.practiceSeconds && typeof song.practiceSeconds === "object" ? song.practiceSeconds : {};
+    const log = Array.isArray(song.practiceLog) ? song.practiceLog : [];
+    if (!log.length && !Object.keys(seconds).length) return;
+    practiceArchive.push({
+      id: song.id,
+      title: song.title || "Untitled",
+      artist: song.artist || "",
+      practiceLog: log,
+      practiceSeconds: seconds,
+      deletedAt: Date.now(),
+    });
+    savePracticeArchive();
+  }
+
+  // A deleted song can come back (re-added, merged from songs.json, restored
+  // from a backup). It takes its archived history with it, and days present on
+  // both sides count once.
+  function reconcilePracticeArchive() {
+    if (!practiceArchive.length) return;
+    let changed = false;
+    for (let i = practiceArchive.length - 1; i >= 0; i--) {
+      const entry = practiceArchive[i];
+      const song = songs.find((s) => s.id === entry.id);
+      if (!song) continue;
+      if (!song.practiceSeconds || typeof song.practiceSeconds !== "object") song.practiceSeconds = {};
+      for (const [day, secs] of Object.entries(entry.practiceSeconds || {})) {
+        if (!Number.isFinite(secs)) continue;
+        song.practiceSeconds[day] = Math.max(song.practiceSeconds[day] || 0, secs);
+      }
+      if (!Array.isArray(song.practiceLog)) song.practiceLog = [];
+      const days = new Set(song.practiceLog.map(startOfDay));
+      for (const ts of entry.practiceLog || []) {
+        if (days.has(startOfDay(ts))) continue;
+        song.practiceLog.push(ts);
+        days.add(startOfDay(ts));
+      }
+      song.practiceLog.sort((a, b) => a - b);
+      song.practiceCount = song.practiceLog.length;
+      practiceArchive.splice(i, 1);
+      changed = true;
+    }
+    if (changed) {
+      savePracticeArchive();
+      saveSongs();
+    }
+  }
+
+  // Everything that feeds the practice stats: the library plus deleted songs
+  function practiceRecords() {
+    const records = songs.map((s) => ({
+      id: s.id,
+      title: s.title,
+      seconds: s.practiceSeconds,
+      log: s.practiceLog,
+      deleted: false,
+    }));
+    for (const entry of practiceArchive) {
+      records.push({
+        id: entry.id,
+        title: entry.title,
+        seconds: entry.practiceSeconds,
+        log: entry.practiceLog,
+        deleted: true,
+      });
+    }
+    return records;
+  }
+
   // Backfill practice fields for songs created before this feature existed, so the
   // counter/calendar have consistent data to read from
   function migratePracticeData() {
@@ -194,6 +338,9 @@
       .then((repoSongs) => {
         let added = 0;
         for (const rs of repoSongs) {
+          // Skip songs the user already deleted — otherwise every reopen
+          // resurrected the demo library from songs.json.
+          if (deletedSongIds.has(rs.id)) continue;
           if (!songs.find((s) => s.id === rs.id)) {
             songs.push(rs);
             added++;
@@ -201,6 +348,7 @@
         }
         if (added) {
           migrateSongSpeed();
+          reconcilePracticeArchive();
           saveSongs();
         }
         return added;
@@ -210,7 +358,7 @@
 
   // ── Views ──
   function showView(view) {
-    [libraryView, editView, playerView, statsView, tunerView].forEach((v) => v.classList.remove("active"));
+    [libraryView, editView, playerView, statsView, practiceTimeView, tunerView].forEach((v) => v.classList.remove("active"));
     view.classList.add("active");
     stopScroll();
     // Leaving the player stops the practice clock and banks whatever it counted
@@ -310,6 +458,8 @@
       el.querySelector(".song-item-delete").addEventListener("click", (e) => {
         e.stopPropagation();
         if (confirm(`Delete "${song.title}"?`)) {
+          rememberDeletedSong(song.id);
+          archiveSongPractice(song);
           songs = songs.filter((s) => s.id !== song.id);
           saveSongs();
           renderLibrary();
@@ -1044,7 +1194,9 @@
   // an afternoon of practice.
   const PRACTICE_IDLE_MS = 2 * 60 * 1000;
   const PRACTICE_TICK_MS = 5000;
-  const PRACTICE_SAVE_EVERY = 6; // ticks, so roughly every 30 seconds
+  // Phones kill backgrounded PWAs without warning, and anything not written out
+  // is time the user practised but never gets credited for.
+  const PRACTICE_SAVE_EVERY = 2; // ticks, so roughly every 10 seconds
 
   function notePracticeActivity() {
     practiceLastActivityAt = Date.now();
@@ -1172,9 +1324,9 @@
   // Collapses every song's practice log into a Set of distinct day-keys the user practiced
   function practicedDaySet() {
     const days = new Set();
-    for (const s of songs) {
-      if (!Array.isArray(s.practiceLog)) continue;
-      for (const ts of s.practiceLog) days.add(startOfDay(ts));
+    for (const rec of practiceRecords()) {
+      if (!Array.isArray(rec.log)) continue;
+      for (const ts of rec.log) days.add(startOfDay(ts));
     }
     return days;
   }
@@ -1259,9 +1411,9 @@
   // Seconds practised per day, summed across every song
   function practiceSecondsByDay() {
     const seconds = new Map();
-    for (const s of songs) {
-      if (!s.practiceSeconds || typeof s.practiceSeconds !== "object") continue;
-      for (const [day, secs] of Object.entries(s.practiceSeconds)) {
+    for (const rec of practiceRecords()) {
+      if (!rec.seconds || typeof rec.seconds !== "object") continue;
+      for (const [day, secs] of Object.entries(rec.seconds)) {
         const key = Number(day);
         if (!Number.isFinite(key) || !Number.isFinite(secs)) continue;
         seconds.set(key, (seconds.get(key) || 0) + secs);
@@ -1285,9 +1437,9 @@
   // ── Global practice calendar (streaks + heatmap) ──
   function practiceCountByDay() {
     const counts = new Map();
-    for (const s of songs) {
-      if (!Array.isArray(s.practiceLog)) continue;
-      for (const ts of s.practiceLog) {
+    for (const rec of practiceRecords()) {
+      if (!Array.isArray(rec.log)) continue;
+      for (const ts of rec.log) {
         const day = startOfDay(ts);
         counts.set(day, (counts.get(day) || 0) + 1);
       }
@@ -1296,30 +1448,35 @@
   }
 
   function openPracticeCalendar() {
+    // Banks whatever the open song has run up, so the numbers below include it
+    showView(statsView);
+
     const daySet = practicedDaySet();
     const streak = computeStreak(daySet);
     const today = startOfDay(Date.now());
     let todayCount = 0;
     let total = 0;
-    for (const s of songs) {
-      if (!Array.isArray(s.practiceLog)) continue;
-      total += s.practiceLog.length;
-      todayCount += s.practiceLog.filter((ts) => startOfDay(ts) === today).length;
+    for (const rec of practiceRecords()) {
+      if (!Array.isArray(rec.log)) continue;
+      total += rec.log.length;
+      todayCount += rec.log.filter((ts) => startOfDay(ts) === today).length;
     }
 
     const secondsByDay = practiceSecondsByDay();
     let totalSeconds = 0;
     for (const secs of secondsByDay.values()) totalSeconds += secs;
+    const todaySeconds = secondsByDay.get(today) || 0;
 
     statsStreakEl.textContent = streak;
     statsTodayEl.textContent = todayCount;
     statsTotalEl.textContent = total;
     statsTimeEl.textContent = formatPracticeTime(totalSeconds);
-    statsTimeTodayEl.textContent = formatPracticeTime(secondsByDay.get(today) || 0) + " today";
+    statsTimeTodayEl.textContent = todaySeconds > 0
+      ? "all time · " + formatPracticeTime(todaySeconds) + " today"
+      : "all time";
     statsStreakEl.parentElement.classList.toggle("active", streak > 0);
 
     renderCalendar(practiceCountByDay(), secondsByDay);
-    showView(statsView);
     if (window.Analytics) window.Analytics.track("stats-open");
   }
 
@@ -1360,6 +1517,227 @@
       }
       statsCalendarEl.appendChild(cell);
     }
+  }
+
+  // ── Practice time breakdown (tapping the "Time practiced" card) ──
+  // The calendar answers "did I practise?"; this answers "how much, and when".
+  let practicePeriodKind = "week";
+  let expandedPeriod = null;
+
+  function periodStart(kind, ts) {
+    const d = new Date(ts);
+    d.setHours(0, 0, 0, 0);
+    if (kind === "week") d.setDate(d.getDate() - d.getDay());
+    else if (kind === "month") d.setDate(1);
+    else if (kind === "year") d.setMonth(0, 1);
+    return d.getTime();
+  }
+
+  // Calendar arithmetic rather than fixed offsets, so months, leap years and
+  // daylight saving all land where they should
+  function nextPeriodStart(kind, start) {
+    const d = new Date(start);
+    if (kind === "week") d.setDate(d.getDate() + 7);
+    else if (kind === "month") d.setMonth(d.getMonth() + 1);
+    else d.setFullYear(d.getFullYear() + 1);
+    return d.getTime();
+  }
+
+  function periodLabel(kind, start) {
+    const now = Date.now();
+    if (start === periodStart(kind, now)) {
+      return kind === "week" ? "This week" : kind === "month" ? "This month" : "This year";
+    }
+    const d = new Date(start);
+    if (kind === "year") return String(d.getFullYear());
+    if (kind === "month") {
+      const sameYear = d.getFullYear() === new Date(now).getFullYear();
+      return d.toLocaleDateString(undefined, sameYear ? { month: "long" } : { month: "long", year: "numeric" });
+    }
+    if (start === periodStart(kind, periodStart(kind, now) - 1)) return "Last week";
+    return periodRange(kind, start);
+  }
+
+  function periodRange(kind, start) {
+    const opts = { month: "short", day: "numeric" };
+    const first = new Date(start);
+    const last = new Date(nextPeriodStart(kind, start) - 1);
+    if (kind === "year") return first.getFullYear() + "";
+    if (kind === "month") return first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    return first.toLocaleDateString(undefined, opts) + " – " + last.toLocaleDateString(undefined, opts);
+  }
+
+  // Time and sessions per period, split by song so a period can be opened up
+  function practicePeriods(kind) {
+    const periods = new Map();
+    const periodFor = (ts) => {
+      const start = periodStart(kind, ts);
+      if (!periods.has(start)) {
+        periods.set(start, { start, seconds: 0, sessions: 0, songs: new Map() });
+      }
+      return periods.get(start);
+    };
+    const songIn = (period, rec) => {
+      if (!period.songs.has(rec.id)) {
+        period.songs.set(rec.id, {
+          title: rec.title || "Untitled",
+          deleted: rec.deleted,
+          seconds: 0,
+          sessions: 0,
+        });
+      }
+      return period.songs.get(rec.id);
+    };
+
+    for (const rec of practiceRecords()) {
+      if (rec.seconds && typeof rec.seconds === "object") {
+        for (const [day, secs] of Object.entries(rec.seconds)) {
+          const ts = Number(day);
+          if (!Number.isFinite(ts) || !Number.isFinite(secs) || secs <= 0) continue;
+          const period = periodFor(ts);
+          period.seconds += secs;
+          songIn(period, rec).seconds += secs;
+        }
+      }
+      if (Array.isArray(rec.log)) {
+        for (const ts of rec.log) {
+          if (!Number.isFinite(ts)) continue;
+          const period = periodFor(ts);
+          period.sessions++;
+          songIn(period, rec).sessions++;
+        }
+      }
+    }
+
+    // The current period is always listed, even before anything lands in it
+    periodFor(Date.now());
+    return [...periods.values()].sort((a, b) => b.start - a.start);
+  }
+
+  // Weeks stay readable for years of practice; the wider tabs cover the rest
+  const PERIOD_LIMITS = { week: 52, month: 36, year: Infinity };
+
+  function secondsBetween(secondsByDay, from, to) {
+    let total = 0;
+    for (const [day, secs] of secondsByDay) {
+      if (day >= from && day < to) total += secs;
+    }
+    return total;
+  }
+
+  function renderPracticeQuickStats(secondsByDay) {
+    const now = Date.now();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const spans = [
+      ["Today", startOfDay(now), startOfDay(now) + oneDay],
+      ["This week", periodStart("week", now), nextPeriodStart("week", periodStart("week", now))],
+      ["This month", periodStart("month", now), nextPeriodStart("month", periodStart("month", now))],
+      ["This year", periodStart("year", now), nextPeriodStart("year", periodStart("year", now))],
+    ];
+    practiceQuickEl.innerHTML = spans
+      .map(([label, from, to]) => `
+        <div class="practice-quick-item">
+          <span class="practice-quick-num">${esc(formatPracticeTime(secondsBetween(secondsByDay, from, to)))}</span>
+          <span class="practice-quick-label">${esc(label)}</span>
+        </div>`)
+      .join("");
+  }
+
+  function renderPracticePeriods() {
+    const kind = practicePeriodKind;
+    const all = practicePeriods(kind);
+    const periods = all.slice(0, PERIOD_LIMITS[kind]);
+    const busiest = periods.reduce((max, p) => Math.max(max, p.seconds), 0);
+
+    practicePeriodsEl.innerHTML = periods
+      .map((period) => {
+        const expanded = period.start === expandedPeriod;
+        const width = busiest > 0 ? Math.round((period.seconds / busiest) * 100) : 0;
+        const label = periodLabel(kind, period.start);
+        const range = periodRange(kind, period.start);
+        const sessions = period.sessions
+          ? `${period.sessions} session${period.sessions === 1 ? "" : "s"}`
+          : "no sessions";
+        // Sessions logged before the app timed practice have no seconds behind them
+        const untimed = period.sessions > 0 && period.seconds <= 0 ? " · not timed" : "";
+        const meta = (range === label ? "" : range + " · ") + sessions + untimed;
+        const songRows = [...period.songs.values()]
+          .sort((a, b) => b.seconds - a.seconds || b.sessions - a.sessions)
+          .map((song) => `
+            <div class="practice-song">
+              <span class="practice-song-title">${esc(song.title)}${song.deleted ? '<span class="practice-song-gone">deleted</span>' : ""}</span>
+              <span class="practice-song-time">${esc(song.seconds > 0 ? formatPracticeTime(song.seconds) : "—")}</span>
+            </div>`)
+          .join("");
+
+        return `
+          <div class="practice-period${expanded ? " expanded" : ""}">
+            <button type="button" class="practice-period-head" data-start="${period.start}" aria-expanded="${expanded}">
+              <span class="practice-period-top">
+                <span class="practice-period-label">${esc(label)}</span>
+                <span class="practice-period-time">${esc(formatPracticeTime(period.seconds))}</span>
+              </span>
+              <span class="practice-bar"><span class="practice-bar-fill" style="width:${width}%"></span></span>
+              <span class="practice-period-meta">${esc(meta)}</span>
+            </button>
+            ${expanded ? `<div class="practice-songs">${songRows || '<p class="practice-songs-empty">Nothing practised in this period.</p>'}</div>` : ""}
+          </div>`;
+      })
+      .join("");
+
+    renderPracticeNote(all.length - periods.length);
+  }
+
+  // Practice from before the app started timing sessions still shows up as
+  // sessions, so say so rather than letting it look like lost time.
+  function practiceUntimedSessions() {
+    let untimed = 0;
+    for (const rec of practiceRecords()) {
+      if (!Array.isArray(rec.log)) continue;
+      for (const ts of rec.log) {
+        const seconds = rec.seconds && typeof rec.seconds === "object" ? rec.seconds[String(startOfDay(ts))] : 0;
+        if (!seconds) untimed++;
+      }
+    }
+    return untimed;
+  }
+
+  function renderPracticeNote(hiddenPeriods) {
+    const notes = [];
+    if (hiddenPeriods > 0) {
+      notes.push(`Showing the most recent ${PERIOD_LIMITS[practicePeriodKind]} — switch to a wider period for anything older.`);
+    }
+    const untimed = practiceUntimedSessions();
+    if (untimed > 0) {
+      notes.push(`${untimed} earlier session${untimed === 1 ? " was" : "s were"} logged before the app timed practice, so they count as sessions but add no time.`);
+    }
+    practiceNoteEl.hidden = notes.length === 0;
+    practiceNoteEl.textContent = notes.join(" ");
+  }
+
+  function renderPracticeTime() {
+    const secondsByDay = practiceSecondsByDay();
+    let totalSeconds = 0;
+    let firstDay = null;
+    for (const [day, secs] of secondsByDay) {
+      totalSeconds += secs;
+      if (firstDay === null || day < firstDay) firstDay = day;
+    }
+
+    practiceTotalEl.textContent = formatPracticeTime(totalSeconds);
+    practiceTotalSubEl.textContent = firstDay === null
+      ? "all time"
+      : "all time · since " + new Date(firstDay).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+
+    renderPracticeQuickStats(secondsByDay);
+    renderPracticePeriods();
+  }
+
+  function openPracticeTime() {
+    showView(practiceTimeView);
+    expandedPeriod = null;
+    renderPracticeTime();
+    if (window.Analytics) window.Analytics.track("practice-time-open", { period: practicePeriodKind });
   }
 
   // ── Tuner (fully offline: mic + Web Audio pitch detection) ──
@@ -1833,6 +2211,30 @@
   editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
   statsBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
 
+  // Practice time breakdown
+  statsTimeCard.addEventListener("click", openPracticeTime);
+  practiceTimeBackBtn.addEventListener("click", openPracticeCalendar);
+
+  practiceTabsEl.addEventListener("click", (e) => {
+    const tab = e.target.closest(".practice-tab");
+    if (!tab || tab.dataset.period === practicePeriodKind) return;
+    practicePeriodKind = tab.dataset.period;
+    expandedPeriod = null;
+    practiceTabsEl.querySelectorAll(".practice-tab").forEach((t) => {
+      t.classList.toggle("active", t === tab);
+    });
+    renderPracticePeriods();
+  });
+
+  // Tapping a period opens up which songs the time went into
+  practicePeriodsEl.addEventListener("click", (e) => {
+    const head = e.target.closest(".practice-period-head");
+    if (!head) return;
+    const start = Number(head.dataset.start);
+    expandedPeriod = expandedPeriod === start ? null : start;
+    renderPracticePeriods();
+  });
+
   // Tuner: open/close and start/stop mic listening
   tunerBtn.addEventListener("click", openTuner);
   tunerBackBtn.addEventListener("click", () => { stopTuner(); showView(libraryView); });
@@ -1948,7 +2350,15 @@
 
   exportBtn.addEventListener("click", () => {
     menuDropdown.classList.add("hidden");
-    const data = JSON.stringify(songs, null, 2);
+    // Backups carry the history of deleted songs and the denylist of deleted
+    // ids, so the all-time totals and "stay deleted" choice survive a move to
+    // another device. Older backups are a bare song array.
+    const data = JSON.stringify({
+      version: 3,
+      songs,
+      practiceArchive,
+      deletedSongIds: [...deletedSongIds],
+    }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -1970,12 +2380,16 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const imported = JSON.parse(reader.result);
-        if (!Array.isArray(imported)) throw new Error("not an array");
+        const parsed = JSON.parse(reader.result);
+        const imported = Array.isArray(parsed) ? parsed : parsed && parsed.songs;
+        if (!Array.isArray(imported)) throw new Error("no songs in the file");
         let added = 0;
         let updated = 0;
         for (const s of imported) {
           if (!s.id || !s.title) continue;
+          // Importing a song is an intentional restore — clear the denylist entry
+          // so a later songs.json merge can keep it (and so the song stays).
+          forgetDeletedSong(s.id);
           const existing = songs.find((x) => x.id === s.id);
           if (existing) {
             Object.assign(existing, s);
@@ -1985,8 +2399,26 @@
             added++;
           }
         }
+        if (!Array.isArray(parsed)) {
+          if (Array.isArray(parsed.practiceArchive)) {
+            for (const entry of parsed.practiceArchive) {
+              if (!entry || !entry.id) continue;
+              if (practiceArchive.some((a) => a.id === entry.id)) continue;
+              practiceArchive.push(entry);
+            }
+            savePracticeArchive();
+          }
+          if (Array.isArray(parsed.deletedSongIds)) {
+            for (const id of parsed.deletedSongIds) {
+              if (!id || songs.find((s) => s.id === id)) continue;
+              deletedSongIds.add(id);
+            }
+            saveDeletedSongIds();
+          }
+        }
         migrateSongSpeed();
         saveSongs();
+        reconcilePracticeArchive();
         renderLibrary();
         alert(`Import done: ${added} added, ${updated} updated.`);
       } catch {
@@ -1999,6 +2431,10 @@
 
   // ── Init ──
   loadSongs();
+  loadPracticeArchive();
+  loadDeletedSongIds();
+  seedDeletedIdsFromArchive();
+  reconcilePracticeArchive();
   migratePracticeData();
   migrateSongSpeed();
   mergeSongsFromRepo().then(() => { renderLibrary(); });
