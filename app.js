@@ -5,6 +5,9 @@
   // Practice history of songs that have been deleted, so the all-time totals
   // stay all-time instead of shrinking with the library.
   const PRACTICE_ARCHIVE_KEY = "guitarscroll_practice_archive";
+  // Song ids the user has deleted. mergeSongsFromRepo() would otherwise put
+  // every songs.json entry back on the next open.
+  const DELETED_SONGS_KEY = "guitarscroll_deleted_songs";
 
   // ── DOM refs ──
   const $ = (s) => document.querySelector(s);
@@ -87,6 +90,7 @@
 
   let songs = [];
   let practiceArchive = [];
+  let deletedSongIds = new Set();
   let editingId = null;
   let currentSongId = null;
   let scrolling = false;
@@ -162,6 +166,48 @@
     try {
       localStorage.setItem(PRACTICE_ARCHIVE_KEY, JSON.stringify(practiceArchive));
     } catch (e) { /* private mode */ }
+  }
+
+  function loadDeletedSongIds() {
+    try {
+      const stored = JSON.parse(localStorage.getItem(DELETED_SONGS_KEY));
+      deletedSongIds = new Set(Array.isArray(stored) ? stored : []);
+    } catch {
+      deletedSongIds = new Set();
+    }
+  }
+  function saveDeletedSongIds() {
+    try {
+      localStorage.setItem(DELETED_SONGS_KEY, JSON.stringify([...deletedSongIds]));
+    } catch (e) { /* private mode */ }
+  }
+
+  // Remember a delete so the next songs.json merge does not put the song back.
+  function rememberDeletedSong(id) {
+    if (!id || deletedSongIds.has(id)) return;
+    deletedSongIds.add(id);
+    saveDeletedSongIds();
+  }
+
+  // The user brought the song back on purpose (backup import, re-add).
+  function forgetDeletedSong(id) {
+    if (!deletedSongIds.has(id)) return;
+    deletedSongIds.delete(id);
+    saveDeletedSongIds();
+  }
+
+  // Songs already sitting in the practice archive were deleted before this
+  // denylist existed — treat them as deleted so a reopen does not resurrect them.
+  function seedDeletedIdsFromArchive() {
+    let changed = false;
+    for (const entry of practiceArchive) {
+      if (!entry || !entry.id) continue;
+      if (songs.find((s) => s.id === entry.id)) continue;
+      if (deletedSongIds.has(entry.id)) continue;
+      deletedSongIds.add(entry.id);
+      changed = true;
+    }
+    if (changed) saveDeletedSongIds();
   }
 
   // Deleting a song removes it from the library but not from your history: the
@@ -292,6 +338,9 @@
       .then((repoSongs) => {
         let added = 0;
         for (const rs of repoSongs) {
+          // Skip songs the user already deleted — otherwise every reopen
+          // resurrected the demo library from songs.json.
+          if (deletedSongIds.has(rs.id)) continue;
           if (!songs.find((s) => s.id === rs.id)) {
             songs.push(rs);
             added++;
@@ -409,6 +458,7 @@
       el.querySelector(".song-item-delete").addEventListener("click", (e) => {
         e.stopPropagation();
         if (confirm(`Delete "${song.title}"?`)) {
+          rememberDeletedSong(song.id);
           archiveSongPractice(song);
           songs = songs.filter((s) => s.id !== song.id);
           saveSongs();
@@ -2300,9 +2350,15 @@
 
   exportBtn.addEventListener("click", () => {
     menuDropdown.classList.add("hidden");
-    // Backups carry the history of deleted songs too, so the all-time totals
-    // survive a move to another device. Older backups are a bare song array.
-    const data = JSON.stringify({ version: 2, songs, practiceArchive }, null, 2);
+    // Backups carry the history of deleted songs and the denylist of deleted
+    // ids, so the all-time totals and "stay deleted" choice survive a move to
+    // another device. Older backups are a bare song array.
+    const data = JSON.stringify({
+      version: 3,
+      songs,
+      practiceArchive,
+      deletedSongIds: [...deletedSongIds],
+    }, null, 2);
     const blob = new Blob([data], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -2331,6 +2387,9 @@
         let updated = 0;
         for (const s of imported) {
           if (!s.id || !s.title) continue;
+          // Importing a song is an intentional restore — clear the denylist entry
+          // so a later songs.json merge can keep it (and so the song stays).
+          forgetDeletedSong(s.id);
           const existing = songs.find((x) => x.id === s.id);
           if (existing) {
             Object.assign(existing, s);
@@ -2340,13 +2399,22 @@
             added++;
           }
         }
-        if (!Array.isArray(parsed) && Array.isArray(parsed.practiceArchive)) {
-          for (const entry of parsed.practiceArchive) {
-            if (!entry || !entry.id) continue;
-            if (practiceArchive.some((a) => a.id === entry.id)) continue;
-            practiceArchive.push(entry);
+        if (!Array.isArray(parsed)) {
+          if (Array.isArray(parsed.practiceArchive)) {
+            for (const entry of parsed.practiceArchive) {
+              if (!entry || !entry.id) continue;
+              if (practiceArchive.some((a) => a.id === entry.id)) continue;
+              practiceArchive.push(entry);
+            }
+            savePracticeArchive();
           }
-          savePracticeArchive();
+          if (Array.isArray(parsed.deletedSongIds)) {
+            for (const id of parsed.deletedSongIds) {
+              if (!id || songs.find((s) => s.id === id)) continue;
+              deletedSongIds.add(id);
+            }
+            saveDeletedSongIds();
+          }
         }
         migrateSongSpeed();
         saveSongs();
@@ -2364,6 +2432,8 @@
   // ── Init ──
   loadSongs();
   loadPracticeArchive();
+  loadDeletedSongIds();
+  seedDeletedIdsFromArchive();
   reconcilePracticeArchive();
   migratePracticeData();
   migrateSongSpeed();
