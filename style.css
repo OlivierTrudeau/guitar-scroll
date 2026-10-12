@@ -574,6 +574,41 @@ html, body {
 }
 
 .line-chord { color: var(--chord); font-weight: 700; }
+
+/* Chord + the lyric it belongs to, so wrapping keeps the chord overhead */
+.paired-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  width: 100%;
+  white-space: normal;
+  word-break: normal;
+  row-gap: 0.35em;
+  margin: 0.1em 0 0.15em;
+}
+.chord-pair {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+.cp-chord {
+  color: var(--chord);
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: pre;
+}
+.cp-lyric {
+  color: var(--text);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+  max-width: 100%;
+}
 .line-section {
   color: var(--section);
   font-weight: 700;

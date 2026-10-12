@@ -1037,6 +1037,43 @@
     return result;
   }
 
+  // A chord sits above the lyric characters that follow it, up to the next chord.
+  // Rendering each of those slices as its own column means a long line wraps
+  // between chords, and the chord stays directly above its words instead of
+  // the whole chord row wrapping separately from the whole lyric row.
+  function chordLyricColumns(chords, lyrics) {
+    const marks = [];
+    const re = /\S+/g;
+    let match;
+    while ((match = re.exec(chords))) {
+      marks.push({ chord: match[0], index: match.index });
+    }
+    if (!marks.length) return [{ chord: "", lyric: lyrics }];
+
+    const end = Math.max(chords.length, lyrics.length);
+    const columns = [];
+    if (marks[0].index > 0) {
+      columns.push({ chord: "", lyric: lyrics.slice(0, marks[0].index) });
+    }
+    for (let i = 0; i < marks.length; i++) {
+      const start = marks[i].index;
+      const stop = i + 1 < marks.length ? marks[i + 1].index : end;
+      columns.push({ chord: marks[i].chord, lyric: lyrics.slice(start, stop) });
+    }
+    return columns;
+  }
+
+  function renderChordLyric(chords, lyrics) {
+    const columns = chordLyricColumns(chords, lyrics)
+      .map((col) => {
+        const chord = col.chord ? esc(col.chord) : "\u00a0";
+        const lyric = col.lyric ? esc(col.lyric) : "\u00a0";
+        return `<span class="chord-pair"><span class="cp-chord">${chord}</span><span class="cp-lyric">${lyric}</span></span>`;
+      })
+      .join("");
+    return `<span class="paired-line">${columns}</span>\n`;
+  }
+
   function renderParsed(parsed) {
     let html = "";
     for (const item of parsed) {
@@ -1051,8 +1088,7 @@
           html += `<span class="line-chord">${esc(item.text)}</span>\n`;
           break;
         case "chord-lyric":
-          html += `<span class="line-chord">${esc(item.chords)}</span>\n`;
-          html += `<span class="line-lyric">${esc(item.lyrics)}</span>\n`;
+          html += renderChordLyric(item.chords, item.lyrics);
           break;
         case "inline-chord": {
           const parts = item.text.split(/(\[[^\]]+\])/g);
