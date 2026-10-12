@@ -87,6 +87,25 @@ Autoscroll always counts; manual practice pauses after two minutes without an
 interaction. Time is stored locally on the device alongside the song library,
 and older sessions cannot be backfilled because they were never timed.
 
+**Time practiced** on the Practice screen is the all-time total. Deleting a song
+does not rewrite that history: its time and sessions move to a separate
+`guitarscroll_practice_archive` entry in local storage, still count towards every
+total, and appear as `deleted` in the breakdown. If that song ever comes back —
+restored from a backup — it takes its archived history with it, and days present
+on both sides count once.
+
+Deleted song ids are also remembered in `guitarscroll_deleted_songs`, so the
+next open does not put a song from `songs.json` back into the library. Importing
+a backup that still contains the song clears that entry and restores it.
+
+Tapping the card opens **Practice time**: the all-time total, how much you've
+played today / this week / this month / this year, and a list of weeks, months or
+years. Tap any period to see which songs the time went into. Backups exported
+from the menu are now
+`{ "version": 3, "songs": [...], "practiceArchive": [...], "deletedSongIds": [...] }`
+so deleted-song history and the denylist move between devices; importing an older
+backup (a bare array of songs, or a v2 object) still works.
+
 ## Usage tracking (analytics)
 
 The app reports anonymous usage so you can see how many people use it, whether

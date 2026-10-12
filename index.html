@@ -149,11 +149,11 @@
             <span id="stats-total" class="stats-num">0</span>
             <span class="stats-card-label">Total sessions</span>
           </div>
-          <div class="stats-card">
+          <button type="button" id="stats-time-card" class="stats-card stats-card-btn">
             <span id="stats-time" class="stats-num">0m</span>
             <span class="stats-card-label">Time practiced</span>
-            <span id="stats-time-today" class="stats-card-sub">0m today</span>
-          </div>
+            <span id="stats-time-today" class="stats-card-sub">all time</span>
+          </button>
         </div>
         <h2 class="stats-heading">Practice calendar</h2>
         <div id="stats-calendar" class="calendar"></div>
@@ -163,6 +163,28 @@
           <span class="cal-cell lvl-2"></span>
           <span class="cal-cell lvl-3"></span> more
         </p>
+      </div>
+    </div>
+
+    <!-- PRACTICE TIME BREAKDOWN (opened from the "Time practiced" card) -->
+    <div id="practice-time-view" class="view">
+      <header class="top-bar">
+        <button id="practice-time-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <h1>Practice time</h1>
+      </header>
+      <div class="stats-body">
+        <div class="practice-total">
+          <span id="practice-total-time" class="practice-total-num">0m</span>
+          <span id="practice-total-sub" class="practice-total-sub">all time</span>
+        </div>
+        <div id="practice-quick" class="practice-quick"></div>
+        <div id="practice-tabs" class="practice-tabs">
+          <button type="button" class="practice-tab active" data-period="week">Weeks</button>
+          <button type="button" class="practice-tab" data-period="month">Months</button>
+          <button type="button" class="practice-tab" data-period="year">Years</button>
+        </div>
+        <div id="practice-periods" class="practice-periods"></div>
+        <p id="practice-note" class="practice-note" hidden></p>
       </div>
     </div>
 
