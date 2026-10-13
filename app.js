@@ -1038,9 +1038,8 @@
   }
 
   // A chord sits above the lyric characters that follow it, up to the next chord.
-  // Rendering each of those slices as its own column means a long line wraps
-  // between chords, and the chord stays directly above its words instead of
-  // the whole chord row wrapping separately from the whole lyric row.
+  // Each slice becomes its own column, so a long line wraps the chord with its
+  // words instead of wrapping the chord row separately from the lyric row.
   function chordLyricColumns(chords, lyrics) {
     const marks = [];
     const re = /\S+/g;
@@ -1063,15 +1062,59 @@
     return columns;
   }
 
+  // A column can start in the middle of a word, because that's where the chord
+  // was typed. Break the lyric into space-separated pieces, then glue any
+  // pieces that don't end on a space back together so the line can only wrap
+  // between words.
+  function chordLyricPieces(chords, lyrics) {
+    const pieces = [];
+    for (const col of chordLyricColumns(chords, lyrics)) {
+      const parts = col.lyric.match(/\s+|\S+/g);
+      if (!parts) {
+        pieces.push({ chord: col.chord, lyric: "" });
+        continue;
+      }
+      parts.forEach((part, i) => {
+        pieces.push({ chord: i === 0 ? col.chord : "", lyric: part });
+      });
+    }
+
+    const groups = [];
+    let group = [];
+    const flush = () => {
+      if (group.length) groups.push(group);
+      group = [];
+    };
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i];
+      const blank = /^\s*$/.test(piece.lyric);
+      const next = pieces[i + 1];
+      // A chord typed on the spaces before a word stays with that word.
+      if (blank && piece.chord && next && !/^\s*$/.test(next.lyric)) {
+        group.push(piece);
+        continue;
+      }
+      group.push(piece);
+      if (blank || /\s$/.test(piece.lyric) || piece.lyric === "") flush();
+    }
+    flush();
+    return groups;
+  }
+
   function renderChordLyric(chords, lyrics) {
-    const columns = chordLyricColumns(chords, lyrics)
-      .map((col) => {
-        const chord = col.chord ? esc(col.chord) : "\u00a0";
-        const lyric = col.lyric ? esc(col.lyric) : "\u00a0";
-        return `<span class="chord-pair"><span class="cp-chord">${chord}</span><span class="cp-lyric">${lyric}</span></span>`;
+    const html = chordLyricPieces(chords, lyrics)
+      .map((group) => {
+        const pairs = group
+          .map((piece) => {
+            const lyric = piece.lyric ? esc(piece.lyric) : "\u00a0";
+            const chord = piece.chord ? `<span class="cp-chord">${esc(piece.chord)}</span>` : "";
+            return `<span class="chord-pair">${chord}<span class="cp-lyric">${lyric}</span></span>`;
+          })
+          .join("");
+        return `<span class="chord-word">${pairs}</span>`;
       })
       .join("");
-    return `<span class="paired-line">${columns}</span>\n`;
+    return `<span class="paired-line">${html}</span>\n`;
   }
 
   function renderParsed(parsed) {
