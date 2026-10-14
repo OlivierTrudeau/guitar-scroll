@@ -579,20 +579,30 @@ html, body {
 .paired-line {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: flex-end;
   width: 100%;
   white-space: normal;
   word-break: normal;
+  overflow-wrap: normal;
   row-gap: 0.35em;
   margin: 0.1em 0 0.15em;
+}
+/* One word, including a chord that starts halfway through it. The line wraps
+   between these, never inside them. */
+.chord-word {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  max-width: 100%;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 .chord-pair {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   flex: 0 0 auto;
-  max-width: 100%;
-  min-width: 0;
 }
 .cp-chord {
   color: var(--chord);
@@ -603,11 +613,9 @@ html, body {
 .cp-lyric {
   color: var(--text);
   line-height: 1.35;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
   word-break: normal;
-  min-width: 0;
-  max-width: 100%;
+  overflow-wrap: normal;
 }
 .line-section {
   color: var(--section);
