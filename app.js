@@ -1037,84 +1037,116 @@
     return result;
   }
 
-  // A chord sits above the lyric characters that follow it, up to the next chord.
-  // Each slice becomes its own column, so a long line wraps the chord with its
-  // words instead of wrapping the chord row separately from the lyric row.
-  function chordLyricColumns(chords, lyrics) {
-    const marks = [];
+  // Chord sheets are monospace, so a chord stays above the right lyric character
+  // only if both strings are cut at the same index. Flex columns broke that on
+  // phones: the scroller's word-break split a word wherever a chord sat inside
+  // it ("h" / "air", "Calif" / "ornian"). These rows are preformatted and only
+  // break on a space, and never through a chord name.
+  function chordTokenSpans(chords) {
+    const spans = [];
     const re = /\S+/g;
     let match;
-    while ((match = re.exec(chords))) {
-      marks.push({ chord: match[0], index: match.index });
-    }
-    if (!marks.length) return [{ chord: "", lyric: lyrics }];
-
-    const end = Math.max(chords.length, lyrics.length);
-    const columns = [];
-    if (marks[0].index > 0) {
-      columns.push({ chord: "", lyric: lyrics.slice(0, marks[0].index) });
-    }
-    for (let i = 0; i < marks.length; i++) {
-      const start = marks[i].index;
-      const stop = i + 1 < marks.length ? marks[i + 1].index : end;
-      columns.push({ chord: marks[i].chord, lyric: lyrics.slice(start, stop) });
-    }
-    return columns;
+    while ((match = re.exec(chords))) spans.push([match.index, match.index + match[0].length]);
+    return spans;
   }
 
-  // A column can start in the middle of a word, because that's where the chord
-  // was typed. Break the lyric into space-separated pieces, then glue any
-  // pieces that don't end on a space back together so the line can only wrap
-  // between words.
-  function chordLyricPieces(chords, lyrics) {
-    const pieces = [];
-    for (const col of chordLyricColumns(chords, lyrics)) {
-      const parts = col.lyric.match(/\s+|\S+/g);
-      if (!parts) {
-        pieces.push({ chord: col.chord, lyric: "" });
-        continue;
-      }
-      parts.forEach((part, i) => {
-        pieces.push({ chord: i === 0 ? col.chord : "", lyric: part });
-      });
+  function isSheetSpace(ch) {
+    return ch === " " || ch === "\t";
+  }
+
+  // Exclusive end index. The next row starts here, including this character,
+  // so a chord that sits on the space keeps its column.
+  function sheetBreak(line, spans, start, maxChars, total) {
+    const hard = Math.min(start + maxChars, total);
+    if (hard >= total) return total;
+
+    let space = -1;
+    const limit = Math.min(hard, line.length);
+    for (let i = start + 1; i < limit; i++) {
+      if (isSheetSpace(line[i])) space = i;
     }
 
-    const groups = [];
-    let group = [];
-    const flush = () => {
-      if (group.length) groups.push(group);
-      group = [];
-    };
-    for (let i = 0; i < pieces.length; i++) {
-      const piece = pieces[i];
-      const blank = /^\s*$/.test(piece.lyric);
-      const next = pieces[i + 1];
-      // A chord typed on the spaces before a word stays with that word.
-      if (blank && piece.chord && next && !/^\s*$/.test(next.lyric)) {
-        group.push(piece);
-        continue;
+    let end = space > start ? space : hard;
+    const cut = spans.find(([a, b]) => a < end && b > end);
+    if (cut) {
+      let wordStart = cut[0];
+      while (wordStart > start && !isSheetSpace(line[wordStart - 1])) wordStart--;
+      if (wordStart > start) {
+        end = wordStart;
+      } else {
+        // The chord starts in the first word of this row. Keep its name whole,
+        // and finish the word it lands in, even if that runs past the measure.
+        end = Math.max(end, cut[1]);
+        while (end < total && end < line.length && !isSheetSpace(line[end])) end++;
       }
-      group.push(piece);
-      if (blank || /\s$/.test(piece.lyric) || piece.lyric === "") flush();
     }
-    flush();
-    return groups;
+    if (end <= start) return Math.min(start + 1, total);
+    return Math.min(end, total);
+  }
+
+  function sheetRowsHtml(chords, lyrics, maxChars) {
+    const width = Math.max(chords.length, lyrics.length, 1);
+    const chordLine = chords.padEnd(width, " ");
+    const lyricLine = lyrics.padEnd(width, " ");
+    const spans = chordTokenSpans(chordLine);
+    const rows = [];
+    let start = 0;
+    let guard = 0;
+    while (start < width && guard++ < width + 2) {
+      if (!chordLine.slice(start).trim() && !lyricLine.slice(start).trim()) break;
+      let end = sheetBreak(lyricLine, spans, start, maxChars, width);
+      if (end <= start) end = Math.min(start + 1, width);
+      const chordSlice = chordLine.slice(start, end).trimEnd();
+      const lyricSlice = lyricLine.slice(start, end).trimEnd();
+      if (chordSlice || lyricSlice) {
+        const chordHtml = chordSlice ? `<span class="line-chord">${esc(chordSlice)}</span>` : "";
+        const lyricHtml = `<span class="line-lyric">${lyricSlice ? esc(lyricSlice) : "\u00a0"}</span>`;
+        rows.push(`<span class="sheet-row">${chordHtml}${lyricHtml}</span>`);
+      }
+      start = end;
+    }
+    return rows.join("");
+  }
+
+  function escAttr(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;");
   }
 
   function renderChordLyric(chords, lyrics) {
-    const html = chordLyricPieces(chords, lyrics)
-      .map((group) => {
-        const pairs = group
-          .map((piece) => {
-            const lyric = piece.lyric ? esc(piece.lyric) : "\u00a0";
-            const chord = piece.chord ? `<span class="cp-chord">${esc(piece.chord)}</span>` : "";
-            return `<span class="chord-pair">${chord}<span class="cp-lyric">${lyric}</span></span>`;
-          })
-          .join("");
-        return `<span class="chord-word">${pairs}</span>`;
-      })
-      .join("");
-    return `<span class="paired-line">${html}</span>\n`;
+    return `<span class="sheet-block" data-chords="${escAttr(chords)}" data-lyrics="${escAttr(lyrics)}"></span>`;
+  }
+
+  let lastSheetWidth = -1;
+
+  function sheetMaxChars() {
+    const style = getComputedStyle(songContent);
+    const pad = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const inner = songContent.clientWidth - pad;
+    const probe = document.createElement("span");
+    probe.textContent = "00000000000000000000000000000000000000000000000000";
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;word-break:normal;overflow-wrap:normal;";
+    songContent.appendChild(probe);
+    const charW = probe.getBoundingClientRect().width / 50;
+    probe.remove();
+    if (!charW || charW < 1) return Math.max(8, Math.floor(inner / 8));
+    // A few pixels of slack stop a rounding error from overflowing into a scrollbar.
+    return Math.max(8, Math.floor((inner - 4) / charW));
+  }
+
+  function layoutSheetBlocks(force) {
+    const blocks = songContent.querySelectorAll(".sheet-block");
+    if (!blocks.length) return;
+    const width = songContent.clientWidth;
+    if (width <= 0) return;
+    if (!force && width === lastSheetWidth) return;
+    lastSheetWidth = width;
+    const maxChars = sheetMaxChars();
+    blocks.forEach((block) => {
+      block.innerHTML = sheetRowsHtml(block.dataset.chords || "", block.dataset.lyrics || "", maxChars);
+    });
   }
 
   function renderParsed(parsed) {
@@ -1182,6 +1214,7 @@
     songContent.scrollTop = 0;
 
     showView(playerView);
+    layoutSheetBlocks(true);
     startPracticeClock(id);
 
     // Track that a song was actually opened — key signal of real usage
@@ -2521,8 +2554,19 @@
   syncSortUI();
   updateSpeedLabel();
 
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => layoutSheetBlocks(false)).observe(songContent);
+  } else {
+    window.addEventListener("resize", () => layoutSheetBlocks(false));
+  }
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => layoutSheetBlocks(true)).catch(() => {});
+  }
+
   // ── Service Worker ──
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
   }
 })();

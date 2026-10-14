@@ -568,55 +568,42 @@ html, body {
   font-size: 14px;
   line-height: 1.6;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
   touch-action: pan-y;
   overscroll-behavior: contain;
 }
 
 .line-chord { color: var(--chord); font-weight: 700; }
 
-/* Chord + the lyric it belongs to, so wrapping keeps the chord overhead */
-.paired-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  width: 100%;
+/* A chord/lyric pair cut into rows that share a column index. pre (not flex)
+   so a phone cannot break a word where a chord sits inside it. */
+.sheet-block {
+  display: block;
   white-space: normal;
   word-break: normal;
   overflow-wrap: normal;
-  row-gap: 0.35em;
-  margin: 0.1em 0 0.15em;
+  margin: 0.15em 0 0.25em;
 }
-/* One word, including a chord that starts halfway through it. The line wraps
-   between these, never inside them. */
-.chord-word {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: flex-end;
-  max-width: 100%;
-  white-space: nowrap;
+.sheet-row {
+  display: block;
+  white-space: normal;
   word-break: normal;
   overflow-wrap: normal;
+  margin: 0.12em 0 0.28em;
 }
-.chord-pair {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  flex: 0 0 auto;
-}
-.cp-chord {
-  color: var(--chord);
-  font-weight: 700;
-  line-height: 1.2;
-  white-space: pre;
-}
-.cp-lyric {
-  color: var(--text);
-  line-height: 1.35;
+.sheet-row .line-chord,
+.sheet-row .line-lyric {
+  display: block;
   white-space: pre;
   word-break: normal;
   overflow-wrap: normal;
+  hyphens: none;
+  -webkit-hyphens: none;
 }
+.sheet-row .line-chord { line-height: 1.2; }
+.sheet-row .line-lyric { line-height: 1.35; color: var(--text); }
 .line-section {
   color: var(--section);
   font-weight: 700;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "guitarscroll-v28";
+const CACHE_NAME = "guitarscroll-v29";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,20 +13,39 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (e) => {
+  // cache.addAll reuses the HTTP cache, which on a phone is often the previous
+  // app.js. Reload so this cache name actually stores the new files.
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      await Promise.all(ASSETS.map(async (url) => {
+        const res = await fetch(new Request(url, { cache: "reload" }));
+        if (!res.ok) throw new Error(url);
+        await cache.put(url, res);
+      }));
+    })
   );
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
+  const ready = caches.keys()
+    .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim());
+  e.waitUntil(ready);
+  // Reload after activate finishes. Doing it inside waitUntil can stall the
+  // navigation on the worker that is waiting for that navigation.
+  ready.then(() => {
+    setTimeout(() => {
+      self.clients.matchAll({ type: "window" }).then((clients) => {
+        clients.forEach((client) => client.navigate(client.url).catch(() => {}));
+      });
+    }, 50);
+  });
 });
+
+function fromCache(request) {
+  return caches.open(CACHE_NAME).then((cache) => cache.match(request));
+}
 
 self.addEventListener("fetch", (e) => {
   // Only handle same-origin requests — let external calls (e.g. GoatCounter
@@ -43,11 +62,11 @@ self.addEventListener("fetch", (e) => {
           caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
           return res;
         })
-        .catch(() => caches.match(e.request))
+        .catch(() => fromCache(e.request))
     );
     return;
   }
   e.respondWith(
-    caches.match(e.request).then((cached) => cached || fetch(e.request))
+    fromCache(e.request).then((cached) => cached || fetch(e.request))
   );
 });
