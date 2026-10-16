@@ -2,15 +2,26 @@
  * Live jam sync for GuitarScroll.
  *
  * The site is static (GitHub Pages), so two phones can't talk to each other
- * directly. A jam is a short code plus a public MQTT broker: the player
- * publishes the open chart once, then the scroll position a few times a
- * second, and everyone who has the code subscribes and follows. The code is
- * the only access check — treat a jam link like a room key.
+ * directly. A jam is a short code plus a few public MQTT brokers: the player
+ * publishes the open chart, then the scroll position a few times a second,
+ * and everyone who has the code subscribes and follows. The room is opened on
+ * every broker at once, so the two phones still meet when one of the relays
+ * is down. The code is the only access check — treat a jam link like a room key.
+ *
+ * Followers do not need the song saved. The host sends the chart itself, again
+ * whenever someone joins without it, and in pieces when it is long. Play
+ * updates also carry the title, so a phone that already has the song can show
+ * it before the rest of the chart arrives.
  *
  * Followers do not copy the host's pixel speed. Charts reflow to the screen
  * width, so the same chord sits at a different scrollTop on each phone. The
  * host sends progress as a fraction of the chart, and the follower scrolls to
  * that fraction, coasting between packets so the motion stays smooth.
+ *
+ * Phones on the same network can find a jam without the code. Browsers can't
+ * broadcast on the LAN, so each one derives a key from its public address
+ * (and the private /24, when WebRTC exposes one) and listens on that topic.
+ * A host announces only the code and the song title there — never the chart.
  */
 (function (root, factory) {
   var api = factory();
@@ -30,6 +41,9 @@
   ];
   var PEER_TTL_MS = 8000;
   var COAST_MS = 1200;
+  // Small enough that a public broker will carry each piece. A short chart
+  // still goes out as one message.
+  var CHUNK_CHARS = 6000;
 
   function randomId(n) {
     var bytes = new Uint8Array(n);
@@ -95,6 +109,60 @@
       h = Math.imul(h, 16777619);
     }
     return (h >>> 0).toString(36);
+  }
+
+  // Cut on code-unit boundaries, but never through a surrogate pair, so a
+  // rejoined chart is byte-for-byte the chart that was sent.
+  function splitChunks(str, size) {
+    str = String(str || "");
+    size = size || CHUNK_CHARS;
+    if (str.length <= size) return [str];
+    var out = [];
+    var i = 0;
+    while (i < str.length) {
+      var end = Math.min(str.length, i + size);
+      if (end < str.length) {
+        var cu = str.charCodeAt(end - 1);
+        if (cu >= 0xD800 && cu <= 0xDBFF) end--;
+        if (end <= i) end = Math.min(str.length, i + 1);
+      }
+      out.push(str.slice(i, end));
+      i = end;
+    }
+    return out;
+  }
+
+  function normName(s) {
+    return String(s || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  // A follower who already saved this song can show it while the host's copy
+  // is still arriving. Id wins; otherwise title and artist, ignoring accents.
+  function matchLibrary(library, hint) {
+    if (!hint || !library || !library.length) return null;
+    var id = hint.id || (hint.song && hint.song.id) || "";
+    var i;
+    if (id) {
+      for (i = 0; i < library.length; i++) {
+        if (library[i] && library[i].id === id && library[i].body) return library[i];
+      }
+    }
+    var title = normName(hint.title || (hint.song && hint.song.title));
+    var artist = normName(hint.artist || (hint.song && hint.song.artist));
+    if (!title) return null;
+    for (i = 0; i < library.length; i++) {
+      var song = library[i];
+      if (!song || !song.body) continue;
+      if (normName(song.title) !== title) continue;
+      if (artist && normName(song.artist) !== artist) continue;
+      return song;
+    }
+    return null;
   }
 
   function progressOf(scrollTop, scrollHeight, clientHeight) {
@@ -426,21 +494,26 @@
 
     var role = "idle";
     var code = "";
-    var socket = null;
+    var sockets = [];
+    var retryTimers = [];
+    var epoch = 0;
+    var announced = false;
     var stopped = false;
     var ended = false;
     var seq = 0;
-    var lastSeqSeen = 0;
     var lockedHost = "";
-    var brokerCursor = 0;
-    var retryTimer = null;
     var hereTimer = null;
     var peerTimer = null;
     var peers = new Map();
     var lastSong = null;
     var lastPlay = null;
     var liveWaiters = [];
-    var connectGen = 0;
+    var heldRev = "";
+    var songHeader = null;
+    var chunkBags = Object.create(null);
+    var lastPlaySeq = 0;
+    var lastResendAt = 0;
+    var resendMs = options.resendMs || 1200;
 
     function emitStatus(status) {
       if (options.onStatus) options.onStatus(status);
@@ -463,25 +536,67 @@
     }
 
     function write(topic, obj, retain) {
-      if (stopped || !socket) return false;
-      try {
-        return socket.publish(topic, encodeJson(obj), !!retain);
-      } catch (e) {
-        return false;
+      if (stopped) return false;
+      var payload;
+      try { payload = encodeJson(obj); }
+      catch (e) { return false; }
+      var ok = false;
+      for (var i = 0; i < sockets.length; i++) {
+        var s = sockets[i];
+        if (!s) continue;
+        try {
+          if (s.publish(topic, payload, !!retain)) ok = true;
+        } catch (e2) { /* that relay is gone */ }
       }
+      return ok;
     }
 
     function transmitSong() {
       if (!lastSong || stopped) return;
-      lastSong.seq = ++seq;
-      write(topics().song, lastSong, true);
+      lastResendAt = Date.now();
+      var header = {
+        v: 1,
+        kind: "song",
+        hostId: lastSong.hostId,
+        rev: lastSong.rev,
+        seq: ++seq,
+        parts: lastSong.parts || 0,
+        song: lastSong.song,
+      };
+      write(topics().song, header, true);
+      var chunks = lastSong.chunks;
+      if (!chunks) return;
+      for (var i = 0; i < chunks.length; i++) {
+        write(topics().song + "/" + i, {
+          v: 1,
+          kind: "chunk",
+          hostId: lastSong.hostId,
+          rev: lastSong.rev,
+          seq: ++seq,
+          i: i,
+          n: chunks.length,
+          data: chunks[i],
+        }, true);
+      }
     }
 
     function transmitPlay() {
       if (!lastPlay || !lastSong || stopped) return;
       lastPlay.seq = ++seq;
       lastPlay.rev = lastSong.rev;
+      lastPlay.id = lastSong.song.id;
+      lastPlay.title = lastSong.song.title;
+      lastPlay.artist = lastSong.song.artist;
       write(topics().play, lastPlay, true);
+    }
+
+    // Someone joined without this chart. Play packets repeat on their own;
+    // the chart has to be asked for again or a missed copy is gone for good.
+    function maybeResend() {
+      var now = Date.now();
+      if (now - lastResendAt < resendMs) return;
+      transmitSong();
+      transmitPlay();
     }
 
     function emitPeers() {
@@ -503,7 +618,7 @@
     function startHere() {
       clearInterval(hereTimer);
       var send = function () {
-        write(topics().here, { v: 1, kind: "here", id: selfId }, false);
+        write(topics().here, { v: 1, kind: "here", id: selfId, rev: heldRev || "" }, false);
       };
       send();
       hereTimer = setInterval(send, hereMs);
@@ -515,6 +630,38 @@
       peerTimer = setInterval(emitPeers, 2000);
     }
 
+    function emitSong(rev, song) {
+      if (!song || !rev || heldRev === rev) return;
+      heldRev = rev;
+      if (options.onSong) {
+        options.onSong({ v: 1, kind: "song", hostId: lockedHost, rev: rev, song: song });
+      }
+    }
+
+    function tryAssemble() {
+      if (!songHeader || songHeader.kind !== "song" || !songHeader.song || !songHeader.rev) return;
+      var rev = songHeader.rev;
+      var n = songHeader.parts || 0;
+      if (!n) {
+        emitSong(rev, songHeader.song);
+        return;
+      }
+      var parts = chunkBags[rev];
+      if (!parts) return;
+      var body = "";
+      for (var i = 0; i < n; i++) {
+        if (typeof parts[i] !== "string") return;
+        body += parts[i];
+      }
+      var song = {};
+      var src = songHeader.song;
+      for (var k in src) {
+        if (Object.prototype.hasOwnProperty.call(src, k)) song[k] = src[k];
+      }
+      song.body = body;
+      emitSong(rev, song);
+    }
+
     function handle(topic, bytes) {
       if (stopped) return;
       var msg;
@@ -523,18 +670,18 @@
       if (!msg || msg.v !== 1) return;
       var t = topics();
       if (role === "host") {
-        if (topic === t.here && msg.kind === "here") notePeer(msg.id);
+        if (topic === t.here && msg.kind === "here") {
+          notePeer(msg.id);
+          if (lastSong && msg.rev !== lastSong.rev) maybeResend();
+        }
         return;
       }
       if (role !== "follow" || ended) return;
-      if (topic !== t.song && topic !== t.play) return;
+      var chunkTopic = topic.indexOf(t.song + "/") === 0;
+      if (topic !== t.song && topic !== t.play && !chunkTopic) return;
       if (msg.hostId) {
         if (lockedHost && msg.hostId !== lockedHost) return;
         lockedHost = msg.hostId;
-      }
-      if (typeof msg.seq === "number") {
-        if (msg.seq <= lastSeqSeen) return;
-        lastSeqSeen = msg.seq;
       }
       if (msg.kind === "end") {
         ended = true;
@@ -544,90 +691,144 @@
         shutdown();
         return;
       }
-      if (topic === t.song && msg.kind === "song" && msg.song) {
-        if (options.onSong) options.onSong(msg);
-      } else if (topic === t.play && msg.kind === "play") {
+      // Play and the chart travel on different topics, and the chart is often
+      // much larger. A shared sequence number let a play packet that arrived
+      // first throw the chart away — which is exactly the message a phone
+      // without the song is waiting on.
+      if (topic === t.play && msg.kind === "play") {
+        if (typeof msg.seq === "number") {
+          if (msg.seq <= lastPlaySeq) return;
+          lastPlaySeq = msg.seq;
+        }
         if (options.onPlay) options.onPlay(msg);
+        return;
+      }
+      if (topic === t.song && msg.kind === "song" && msg.song) {
+        var kept = chunkBags[msg.rev];
+        songHeader = msg;
+        chunkBags = Object.create(null);
+        if (kept) chunkBags[msg.rev] = kept;
+        tryAssemble();
+        return;
+      }
+      if (chunkTopic && msg.kind === "chunk" && msg.rev && typeof msg.i === "number") {
+        if (!chunkBags[msg.rev]) chunkBags[msg.rev] = [];
+        chunkBags[msg.rev][msg.i] = String(msg.data == null ? "" : msg.data);
+        tryAssemble();
       }
     }
 
-    function scheduleRetry() {
-      brokerCursor++;
-      emitStatus("reconnecting");
-      var wait = Math.min(5000, 350 * brokerCursor);
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(function () {
-        if (!stopped) attempt();
-      }, wait);
+    function later(fn, ms) {
+      var timer = setTimeout(fn, ms);
+      retryTimers.push(timer);
+      return timer;
     }
 
-    function attempt() {
-      var gen = ++connectGen;
-      var url = brokers[brokerCursor % brokers.length];
-      connect(url, {
-        clientId: "g" + randomId(10),
-        onMessage: function (topic, payload) {
-          if (gen !== connectGen || stopped) return;
-          handle(topic, payload);
-        },
-        onClose: function () {
-          if (gen !== connectGen || stopped) return;
-          socket = null;
-          scheduleRetry();
-        },
-      }).then(function (conn) {
-        if (gen !== connectGen || stopped) {
-          try { conn.close(); } catch (e) { /* replaced by a newer socket */ }
-          return;
-        }
-        socket = conn;
-        var t = topics();
-        var sub = role === "host"
-          ? conn.subscribe(t.here)
-          : conn.subscribe(t.song).then(function () { return conn.subscribe(t.play); });
-        return sub.then(function () {
-          if (gen !== connectGen || stopped) {
-            try { conn.close(); } catch (e) { /* user left while subscribing */ }
-            return;
-          }
-          emitStatus("live");
-          if (role === "host") {
-            transmitSong();
-            transmitPlay();
-            startPeerSweep();
-          } else {
-            startHere();
-          }
-          readyWaiters();
-        }, function () {
-          // Closing trips onClose, which is what schedules the retry.
-          try { conn.close(); } catch (e) { /* already closing */ }
-        });
-      }).catch(function () {
-        if (gen !== connectGen || stopped) return;
-        socket = null;
-        scheduleRetry();
+    function clearRetries() {
+      for (var i = 0; i < retryTimers.length; i++) clearTimeout(retryTimers[i]);
+      retryTimers = [];
+    }
+
+    function subscribeAll(conn) {
+      var t = topics();
+      if (role === "host") return conn.subscribe(t.here);
+      return conn.subscribe(t.song).then(function () {
+        return conn.subscribe(t.song + "/#");
+      }).then(function () {
+        return conn.subscribe(t.play);
       });
     }
 
+    // The first relay to come up is enough to start. Each one that joins
+    // after that gets the chart too, so a follower stuck on a different
+    // relay still receives it.
+    function noteLive() {
+      var first = !announced;
+      announced = true;
+      if (first) {
+        emitStatus("live");
+        if (role === "host") startPeerSweep();
+        else startHere();
+        readyWaiters();
+      }
+      if (role === "host") {
+        transmitSong();
+        transmitPlay();
+      }
+    }
+
+    function noteDrop() {
+      var any = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) any = true;
+      if (!any && announced && !stopped) {
+        announced = false;
+        emitStatus("reconnecting");
+      }
+    }
+
+    function connectOne(idx, seenEpoch) {
+      if (stopped || seenEpoch !== epoch) return;
+      connect(brokers[idx], {
+        clientId: "g" + randomId(10),
+        onMessage: function (topic, payload) {
+          if (seenEpoch !== epoch || stopped) return;
+          handle(topic, payload);
+        },
+        onClose: function () {
+          if (seenEpoch !== epoch || stopped) return;
+          sockets[idx] = null;
+          noteDrop();
+          later(function () { connectOne(idx, seenEpoch); }, 500);
+        },
+      }).then(function (conn) {
+        if (seenEpoch !== epoch || stopped) {
+          try { conn.close(); } catch (e) { /* replaced by a newer socket */ }
+          return;
+        }
+        return subscribeAll(conn).then(function () {
+          if (seenEpoch !== epoch || stopped) {
+            try { conn.close(); } catch (e) { /* user left while subscribing */ }
+            return;
+          }
+          sockets[idx] = conn;
+          noteLive();
+        }, function () {
+          try { conn.close(); } catch (e) { /* already closing */ }
+          if (seenEpoch === epoch && !stopped) later(function () { connectOne(idx, seenEpoch); }, 500);
+        });
+      }).catch(function () {
+        if (seenEpoch !== epoch || stopped) return;
+        later(function () { connectOne(idx, seenEpoch); }, 700);
+      });
+    }
+
+    function connectAll() {
+      sockets = new Array(brokers.length);
+      for (var i = 0; i < brokers.length; i++) connectOne(i, epoch);
+    }
+
     function shutdown() {
-      if (stopped && !socket && !hereTimer && !peerTimer && liveWaiters.length === 0) {
+      var busy = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) busy = true;
+      if (stopped && !busy && !hereTimer && !peerTimer && liveWaiters.length === 0 && retryTimers.length === 0) {
         role = "idle";
         return;
       }
       stopped = true;
       ended = true;
       role = "idle";
-      connectGen++;
-      clearTimeout(retryTimer);
+      epoch++;
+      announced = false;
+      clearRetries();
       clearInterval(hereTimer);
       clearInterval(peerTimer);
       hereTimer = null;
       peerTimer = null;
-      var s = socket;
-      socket = null;
-      if (s) {
-        try { s.close(); } catch (e) { /* already closed */ }
+      var open = sockets;
+      sockets = [];
+      for (var j = 0; j < open.length; j++) {
+        if (!open[j]) continue;
+        try { open[j].close(); } catch (e) { /* already closed */ }
       }
       failWaiters(new Error("closed"));
     }
@@ -643,17 +844,21 @@
       role = nextRole;
       code = norm;
       seq = 0;
-      lastSeqSeen = 0;
       lockedHost = nextRole === "host" ? hostId : "";
       lastSong = null;
       lastPlay = null;
       peers = new Map();
-      brokerCursor = 0;
+      heldRev = "";
+      songHeader = null;
+      chunkBags = Object.create(null);
+      lastPlaySeq = 0;
+      lastResendAt = 0;
+      announced = false;
       emitStatus("connecting");
       var promise = new Promise(function (resolve, reject) {
         liveWaiters.push({ resolve: resolve, reject: reject });
       });
-      attempt();
+      connectAll();
       return promise;
     }
 
@@ -665,7 +870,27 @@
       publishSong: function (song) {
         if (role !== "host" || ended || stopped) return;
         var pub = publicSong(song);
-        lastSong = { v: 1, kind: "song", hostId: hostId, rev: songRev(pub), song: pub };
+        var rev = songRev(pub);
+        var pieces = splitChunks(pub.body, CHUNK_CHARS);
+        if (pieces.length <= 1) {
+          lastSong = { hostId: hostId, rev: rev, parts: 0, song: pub, chunks: null };
+        } else {
+          lastSong = {
+            hostId: hostId,
+            rev: rev,
+            parts: pieces.length,
+            song: {
+              id: pub.id,
+              title: pub.title,
+              artist: pub.artist,
+              capo: pub.capo,
+              strum: pub.strum,
+              speed: pub.speed,
+              body: "",
+            },
+            chunks: pieces,
+          };
+        }
         transmitSong();
       },
       publishPlay: function (state) {
@@ -676,6 +901,9 @@
           kind: "play",
           hostId: hostId,
           rev: lastSong.rev,
+          id: lastSong.song.id,
+          title: lastSong.song.title,
+          artist: lastSong.song.artist,
           playing: !!state.playing,
           seek: !!state.seek,
           speed: typeof state.speed === "number" ? state.speed : null,
@@ -703,6 +931,420 @@
     };
   }
 
+  function nearKeyFrom(text) {
+    text = String(text || "");
+    if (!text) return "";
+    var h1 = 2166136261;
+    var h2 = 2166136261 ^ 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      h1 ^= c;
+      h1 = Math.imul(h1, 16777619);
+      h2 ^= c;
+      h2 = Math.imul(h2, 16777619);
+    }
+    h1 = h1 >>> 0;
+    h2 = h2 >>> 0;
+    var s = "";
+    var n = ALPHABET.length;
+    for (var a = 0; a < 4; a++) {
+      s += ALPHABET[h1 % n];
+      h1 = Math.floor(h1 / n);
+    }
+    for (var b = 0; b < 4; b++) {
+      s += ALPHABET[h2 % n];
+      h2 = Math.floor(h2 / n);
+    }
+    return s;
+  }
+
+  function usableNearKey(key) {
+    key = String(key || "").trim().toUpperCase();
+    if (key.length !== 8) return "";
+    for (var i = 0; i < key.length; i++) {
+      if (ALPHABET.indexOf(key.charAt(i)) === -1) return "";
+    }
+    return key;
+  }
+
+  function ipv4Parts(ip) {
+    var m = String(ip || "").match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return null;
+    var parts = [+m[1], +m[2], +m[3], +m[4]];
+    for (var i = 0; i < 4; i++) if (parts[i] > 255) return null;
+    return parts;
+  }
+
+  function isPrivateIp(ip) {
+    var p = ipv4Parts(ip);
+    if (!p) return false;
+    if (p[0] === 10) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    return false;
+  }
+
+  function isPublicIp(ip) {
+    var p = ipv4Parts(ip);
+    if (!p) return false;
+    if (isPrivateIp(ip)) return false;
+    if (p[0] === 0 || p[0] === 127 || p[0] >= 224) return false;
+    if (p[0] === 169 && p[1] === 254) return false;
+    return true;
+  }
+
+  function privatePrefix(ip) {
+    if (!isPrivateIp(ip)) return "";
+    var p = ipv4Parts(ip);
+    return p[0] + "." + p[1] + "." + p[2] + ".0/24";
+  }
+
+  function tracePublicIp() {
+    if (typeof fetch !== "function") return Promise.resolve("");
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 2500);
+    var opts = ctrl ? { signal: ctrl.signal } : undefined;
+    function read(url, pick) {
+      return fetch(url, opts).then(function (r) { return r.text(); }).then(pick);
+    }
+    return read("https://www.cloudflare.com/cdn-cgi/trace", function (text) {
+      var m = String(text || "").match(/(?:^|\n)ip=([0-9.]+)/);
+      return m && isPublicIp(m[1]) ? m[1] : "";
+    }).catch(function () { return ""; }).then(function (ip) {
+      if (ip) return ip;
+      return read("https://api.ipify.org?format=json", function (text) {
+        var m = String(text || "").match(/"ip"\s*:\s*"([0-9.]+)"/);
+        return m && isPublicIp(m[1]) ? m[1] : "";
+      }).catch(function () { return ""; });
+    }).then(function (ip) {
+      clearTimeout(timer);
+      return ip || "";
+    });
+  }
+
+  function discoverNetwork() {
+    return new Promise(function (resolve) {
+      if (typeof RTCPeerConnection !== "function") {
+        tracePublicIp().then(function (ip) { resolve({ publicIp: ip, privatePrefix: "" }); });
+        return;
+      }
+      var pc;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun.cloudflare.com:3478" },
+          ],
+        });
+      } catch (e) {
+        tracePublicIp().then(function (ip) { resolve({ publicIp: ip, privatePrefix: "" }); });
+        return;
+      }
+      var done = false;
+      var publicIp = "";
+      var prefix = "";
+      function finish() {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { pc.close(); } catch (err) { /* gathering already finished */ }
+        if (publicIp) {
+          resolve({ publicIp: publicIp, privatePrefix: prefix });
+          return;
+        }
+        tracePublicIp().then(function (ip) {
+          resolve({ publicIp: ip || "", privatePrefix: prefix });
+        });
+      }
+      var timer = setTimeout(finish, 2500);
+      pc.onicecandidate = function (ev) {
+        if (!ev.candidate) {
+          finish();
+          return;
+        }
+        var parts = String(ev.candidate.candidate || "").split(" ");
+        var ip = parts[4] || "";
+        var typ = "";
+        for (var i = 0; i < parts.length; i++) {
+          if (parts[i] === "typ" && parts[i + 1]) typ = parts[i + 1];
+        }
+        if ((typ === "srflx" || typ === "host") && isPublicIp(ip) && !publicIp) publicIp = ip;
+        if (typ === "host" && !prefix) prefix = privatePrefix(ip);
+        if (publicIp && prefix) finish();
+      };
+      try {
+        pc.createDataChannel("gs");
+        pc.createOffer().then(function (offer) {
+          return pc.setLocalDescription(offer);
+        }).catch(function () { finish(); });
+      } catch (e2) {
+        finish();
+      }
+    });
+  }
+
+  function networkKey(options) {
+    options = options || {};
+    var storage = options.storage || null;
+    if (!storage && typeof localStorage !== "undefined") {
+      try { storage = localStorage; } catch (e) { storage = null; }
+    }
+    if (storage) {
+      try {
+        var override = usableNearKey(storage.getItem("guitarscroll_netkey"));
+        if (override) return Promise.resolve(override);
+      } catch (e2) { /* private mode */ }
+    }
+    return discoverNetwork().then(function (info) {
+      if (!info || !info.publicIp) return "";
+      var material = info.publicIp;
+      if (info.privatePrefix) material += "|" + info.privatePrefix;
+      return nearKeyFrom(material);
+    });
+  }
+
+  function createNearby(options) {
+    options = options || {};
+    var connect = options.connect || defaultConnect;
+    var brokers = options.brokers || BROKERS.slice();
+    var selfId = options.selfId || randomId(8);
+    var key = usableNearKey(options.key);
+    var announceMs = options.announceMs || 2000;
+    var sockets = [];
+    var retryTimers = [];
+    var epoch = 0;
+    var stopped = true;
+    var announced = false;
+    var info = null;
+    var announceTimer = null;
+    var liveWaiters = [];
+
+    function topic() {
+      return "gsjam/v1/near/" + key;
+    }
+
+    function emitStatus(status) {
+      if (options.onStatus) options.onStatus(status);
+    }
+
+    function failWaiters(err) {
+      var waiters = liveWaiters;
+      liveWaiters = [];
+      for (var i = 0; i < waiters.length; i++) waiters[i].reject(err);
+    }
+
+    function readyWaiters() {
+      var waiters = liveWaiters;
+      liveWaiters = [];
+      for (var i = 0; i < waiters.length; i++) waiters[i].resolve(key);
+    }
+
+    function write(obj) {
+      if (stopped) return false;
+      var payload;
+      try { payload = encodeJson(obj); }
+      catch (e) { return false; }
+      var ok = false;
+      for (var i = 0; i < sockets.length; i++) {
+        var s = sockets[i];
+        if (!s) continue;
+        try {
+          if (s.publish(topic(), payload, false)) ok = true;
+        } catch (e2) { /* that relay is gone */ }
+      }
+      return ok;
+    }
+
+    function transmit() {
+      if (!info || stopped) return;
+      write({
+        v: 1,
+        kind: "near",
+        from: selfId,
+        code: info.code,
+        title: info.title || "",
+        artist: info.artist || "",
+      });
+    }
+
+    function transmitStop(code) {
+      write({ v: 1, kind: "near-stop", from: selfId, code: code || "" });
+    }
+
+    function handle(topicName, bytes) {
+      if (stopped || topicName !== topic()) return;
+      var msg;
+      try { msg = JSON.parse(new TextDecoder().decode(bytes)); }
+      catch (e) { return; }
+      if (!msg || msg.v !== 1 || !msg.from || msg.from === selfId) return;
+      if (msg.kind === "near") {
+        var code = normalizeCode(msg.code);
+        if (!code) return;
+        if (options.onNear) {
+          options.onNear({
+            from: String(msg.from),
+            code: code,
+            title: String(msg.title || ""),
+            artist: String(msg.artist || ""),
+          });
+        }
+        return;
+      }
+      if (msg.kind === "near-stop") {
+        if (options.onStop) {
+          options.onStop({
+            from: String(msg.from),
+            code: normalizeCode(msg.code) || "",
+          });
+        }
+      }
+    }
+
+    function later(fn, ms) {
+      var timer = setTimeout(fn, ms);
+      retryTimers.push(timer);
+      return timer;
+    }
+
+    function clearRetries() {
+      for (var i = 0; i < retryTimers.length; i++) clearTimeout(retryTimers[i]);
+      retryTimers = [];
+    }
+
+    function noteLive() {
+      var first = !announced;
+      announced = true;
+      if (first) {
+        emitStatus("live");
+        readyWaiters();
+      }
+      if (info) {
+        transmit();
+        if (!announceTimer) announceTimer = setInterval(transmit, announceMs);
+      }
+    }
+
+    function noteDrop() {
+      var any = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) any = true;
+      if (!any && announced && !stopped) {
+        announced = false;
+        clearInterval(announceTimer);
+        announceTimer = null;
+        emitStatus("reconnecting");
+      }
+    }
+
+    function connectOne(idx, seenEpoch) {
+      if (stopped || seenEpoch !== epoch) return;
+      connect(brokers[idx], {
+        clientId: "n" + randomId(10),
+        onMessage: function (topicName, payload) {
+          if (seenEpoch !== epoch || stopped) return;
+          handle(topicName, payload);
+        },
+        onClose: function () {
+          if (seenEpoch !== epoch || stopped) return;
+          sockets[idx] = null;
+          noteDrop();
+          later(function () { connectOne(idx, seenEpoch); }, 500);
+        },
+      }).then(function (conn) {
+        if (seenEpoch !== epoch || stopped) {
+          try { conn.close(); } catch (e) { /* replaced */ }
+          return;
+        }
+        return conn.subscribe(topic()).then(function () {
+          if (seenEpoch !== epoch || stopped) {
+            try { conn.close(); } catch (e) { /* left while subscribing */ }
+            return;
+          }
+          sockets[idx] = conn;
+          noteLive();
+        }, function () {
+          try { conn.close(); } catch (e) { /* already closing */ }
+          if (seenEpoch === epoch && !stopped) later(function () { connectOne(idx, seenEpoch); }, 500);
+        });
+      }).catch(function () {
+        if (seenEpoch !== epoch || stopped) return;
+        later(function () { connectOne(idx, seenEpoch); }, 700);
+      });
+    }
+
+    function connectAll() {
+      sockets = new Array(brokers.length);
+      for (var i = 0; i < brokers.length; i++) connectOne(i, epoch);
+    }
+
+    function shutdown() {
+      var busy = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) busy = true;
+      if (stopped && !busy && liveWaiters.length === 0 && retryTimers.length === 0 && !announceTimer) return;
+      if (info && announced && !stopped) {
+        var code = info.code;
+        info = null;
+        clearInterval(announceTimer);
+        announceTimer = null;
+        transmitStop(code);
+      }
+      stopped = true;
+      epoch++;
+      announced = false;
+      clearRetries();
+      clearInterval(announceTimer);
+      announceTimer = null;
+      var open = sockets;
+      sockets = [];
+      for (var j = 0; j < open.length; j++) {
+        if (!open[j]) continue;
+        try { open[j].close(); } catch (e) { /* already closed */ }
+      }
+      failWaiters(new Error("closed"));
+    }
+
+    return {
+      get key() { return key; },
+      open: function () {
+        if (!key) return Promise.reject(new Error("bad key"));
+        if (!stopped && announced) return Promise.resolve(key);
+        shutdown();
+        stopped = false;
+        announced = false;
+        epoch++;
+        emitStatus("connecting");
+        var promise = new Promise(function (resolve, reject) {
+          liveWaiters.push({ resolve: resolve, reject: reject });
+        });
+        connectAll();
+        return promise;
+      },
+      announce: function (next) {
+        if (!next) {
+          var had = info;
+          info = null;
+          clearInterval(announceTimer);
+          announceTimer = null;
+          if (had && announced && !stopped) transmitStop(had.code);
+          return;
+        }
+        var code = normalizeCode(next.code);
+        if (!code) return;
+        info = {
+          code: code,
+          title: String(next.title || ""),
+          artist: String(next.artist || ""),
+        };
+        if (announced && !stopped) {
+          transmit();
+          if (!announceTimer) announceTimer = setInterval(transmit, announceMs);
+        }
+      },
+      close: function () {
+        shutdown();
+      },
+    };
+  }
+
   return {
     ALPHABET: ALPHABET,
     BROKERS: BROKERS,
@@ -711,9 +1353,15 @@
     jamTopics: jamTopics,
     publicSong: publicSong,
     songRev: songRev,
+    splitChunks: splitChunks,
+    matchLibrary: matchLibrary,
     progressOf: progressOf,
     cursorFromSample: cursorFromSample,
     targetProgress: targetProgress,
+    nearKeyFrom: nearKeyFrom,
+    usableNearKey: usableNearKey,
+    isPrivateIp: isPrivateIp,
+    networkKey: networkKey,
     encodeConnect: encodeConnect,
     encodePublish: encodePublish,
     encodeSubscribe: encodeSubscribe,
@@ -721,5 +1369,6 @@
     encodeDisconnect: encodeDisconnect,
     createParser: createParser,
     createSession: createSession,
+    createNearby: createNearby,
   };
 });

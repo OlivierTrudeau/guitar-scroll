@@ -90,6 +90,13 @@
   const jamJoinBlock = $("#jam-join-block");
   const jamCodeInput = $("#jam-code-input");
   const jamJoinError = $("#jam-join-error");
+  const jamJoinStatus = $("#jam-join-status");
+  const jamJoinedBlock = $("#jam-joined-block");
+  const jamJoinedText = $("#jam-joined-text");
+  const jamNearby = $("#jam-nearby");
+  const jamNearbyTitle = $("#jam-nearby-title");
+  const jamNearbyJoin = $("#jam-nearby-join");
+  const jamNearbyNo = $("#jam-nearby-no");
   const joinJamBtn = $("#join-jam-btn");
   // Global practice calendar view
   const statsView = $("#stats-view");
@@ -145,6 +152,9 @@
   let jamJoinGen = 0;
   let jamTrackedJoin = false;
   let followRev = "";
+  let followBody = "";
+  let followChartFromHost = false;
+  let heardHost = false;
   let followCursor = null;
   let pendingPlay = null;
   let followEnded = false;
@@ -153,6 +163,16 @@
   let jamWaitTimer = null;
   let lastSentPlayKey = "";
   let lastSentPlayAt = 0;
+  let jamFocusTimer = 0;
+  let jamJoinedTimer = 0;
+  let joinConfirmed = false;
+  let jamSomeoneUntil = 0;
+  let jamSomeoneTimer = 0;
+  let nearby = null;
+  let nearbyWant = null;
+  let nearbyOffer = null;
+  const nearbyDismissed = new Set();
+  let nearbySilenceTimer = 0;
 
   // ── Speed multiplier ──
   // A song can carry the speed it's meant to be played at, which the player
@@ -1269,7 +1289,10 @@
     if (jamIsFollow() || followRev) leaveFollow();
     const hosting = jamIsHost();
     renderSong(song, { deferShow: true });
-    if (hosting) jamSession.publishSong(song);
+    if (hosting) {
+      jamSession.publishSong(song);
+      syncNearby();
+    }
     showView(playerView);
     layoutSheetBlocks(true);
     if (hosting) jamFlushPlay(true);
@@ -2399,6 +2422,7 @@
   function hostStatusLine() {
     if (jamLinkStatus === "reconnecting") return "Reconnecting…";
     if (jamLinkStatus !== "live") return "Connecting…";
+    if (jamPeerCount > 0 && jamSomeoneUntil > Date.now()) return "Someone joined";
     return followerLabel(jamPeerCount);
   }
 
@@ -2455,32 +2479,102 @@
   }
 
   function closeJamSheet() {
+    clearTimeout(jamFocusTimer);
+    jamFocusTimer = 0;
+    clearTimeout(jamJoinedTimer);
+    jamJoinedTimer = 0;
     jamSheet.hidden = true;
+    try { jamCodeInput.blur(); } catch (e) { /* already gone */ }
+    refreshNearbyPrompt();
   }
 
   function openHostSheet() {
     jamSheetMode = "host";
     jamSheet.hidden = false;
     jamSheetTitle.textContent = "Jam";
-    jamSheetLead.textContent = "Anyone with this code follows the song you're playing — the chart, the scroll, and the speed.";
+    jamSheetLead.textContent = "Anyone with this code follows along, even if they don't have the song saved. They get the chart, the scroll, and the speed.";
     jamCodeBlock.hidden = false;
     jamJoinBlock.hidden = true;
+    jamJoinedBlock.hidden = true;
     jamCodeEl.textContent = jamCode;
     showJoinError("");
     refreshJamChrome();
+    refreshNearbyPrompt();
   }
 
   function openJoinSheet(prefill) {
+    clearTimeout(jamJoinedTimer);
+    jamJoinedTimer = 0;
     jamSheetMode = "join";
     jamSheet.hidden = false;
     jamSheetTitle.textContent = "Join a jam";
     jamSheetLead.textContent = "Enter the code from the person who's playing.";
     jamCodeBlock.hidden = true;
     jamJoinBlock.hidden = false;
+    jamJoinedBlock.hidden = true;
+    jamJoinStatus.hidden = true;
+    jamJoinStatus.textContent = "";
     showJoinError("");
     jamSheetStatus.textContent = "";
     if (typeof prefill === "string") jamCodeInput.value = prefill;
-    setTimeout(() => jamCodeInput.focus(), 50);
+    clearTimeout(jamFocusTimer);
+    jamFocusTimer = setTimeout(() => {
+      jamFocusTimer = 0;
+      if (!jamSheet.hidden && !jamJoinBlock.hidden) jamCodeInput.focus();
+    }, 50);
+    refreshNearbyPrompt();
+  }
+
+  function showJoining(line) {
+    clearTimeout(jamFocusTimer);
+    jamFocusTimer = 0;
+    clearTimeout(jamJoinedTimer);
+    jamJoinedTimer = 0;
+    try { jamCodeInput.blur(); } catch (e) { /* input not focused */ }
+    jamSheetMode = "join";
+    jamSheet.hidden = false;
+    jamSheetTitle.textContent = "Joining…";
+    jamSheetLead.textContent = "You'll get their chart even if it's not in your library.";
+    jamCodeBlock.hidden = true;
+    jamJoinBlock.hidden = true;
+    jamJoinedBlock.hidden = false;
+    jamJoinedText.textContent = line;
+    showJoinError("");
+    refreshNearbyPrompt();
+  }
+
+  function showJoinProblem(msg) {
+    openJoinSheet(jamCode);
+    jamJoinStatus.hidden = !msg;
+    jamJoinStatus.textContent = msg || "";
+  }
+
+  function confirmJoined(song) {
+    if (joinConfirmed) {
+      if (!jamSheet.hidden && jamSheetTitle.textContent !== "You're in") closeJamSheet();
+      return;
+    }
+    joinConfirmed = true;
+    clearTimeout(jamFocusTimer);
+    jamFocusTimer = 0;
+    try { jamCodeInput.blur(); } catch (e) { /* input not focused */ }
+    const title = (song && song.title) || "the jam";
+    const artist = song && song.artist ? " · " + song.artist : "";
+    jamSheetMode = "join";
+    jamSheet.hidden = false;
+    jamSheetTitle.textContent = "You're in";
+    jamSheetLead.textContent = "You'll follow along as they play.";
+    jamCodeBlock.hidden = true;
+    jamJoinBlock.hidden = true;
+    jamJoinedBlock.hidden = false;
+    jamJoinedText.textContent = title + artist;
+    showJoinError("");
+    clearTimeout(jamJoinedTimer);
+    jamJoinedTimer = setTimeout(() => {
+      jamJoinedTimer = 0;
+      if (joinConfirmed) closeJamSheet();
+    }, 1800);
+    refreshNearbyPrompt();
   }
 
   async function copyText(text) {
@@ -2564,10 +2658,13 @@
     jamCode = "";
     jamLinkStatus = "idle";
     jamPeerCount = 0;
+    jamSomeoneUntil = 0;
+    clearTimeout(jamSomeoneTimer);
     lastSentPlayKey = "";
     stopJamPump();
     try { session.end(); } catch (e) { /* socket already gone */ }
     closeJamSheet();
+    syncNearby();
     refreshJamChrome();
   }
 
@@ -2585,15 +2682,20 @@
     jamJoinGen++;
     dropFollowQuiet();
     followRev = "";
+    followBody = "";
+    followChartFromHost = false;
+    heardHost = false;
     followCursor = null;
     pendingPlay = null;
     followEnded = false;
     jamTrackedJoin = false;
+    joinConfirmed = false;
     jamCode = "";
     jamLinkStatus = "idle";
     setFollowChrome(false);
     setJamQuery("");
     closeJamSheet();
+    syncNearby();
     if (playerView.classList.contains("active")) showView(libraryView);
     refreshJamChrome();
   }
@@ -2642,31 +2744,76 @@
     followEnded = false;
   }
 
+  function followSongFromLibrary(song) {
+    return {
+      id: song.id,
+      title: song.title || "",
+      artist: song.artist || "",
+      capo: song.capo || "",
+      strum: song.strum || "",
+      speed: song.speed,
+      body: song.body || "",
+    };
+  }
+
+  function showGetting(msg, switching) {
+    const title = (msg && msg.title) || (msg && msg.song && msg.song.title) || "";
+    const line = title ? "Getting " + title + "…" : "Getting the chart…";
+    if (switching && followRev) {
+      jamBannerText.textContent = line;
+      return;
+    }
+    if (joinConfirmed) return;
+    showJoining(line);
+  }
+
   function onJamSong(msg) {
     if (!msg || !msg.song || !msg.rev) return;
+    heardHost = true;
     clearTimeout(jamWaitTimer);
     showJoinError("");
     if (!jamTrackedJoin) {
       jamTrackedJoin = true;
       if (window.Analytics) window.Analytics.track("jam-join", { song_title: msg.song.title || "" });
     }
-    if (msg.rev !== followRev) {
-      followRev = msg.rev;
+    const body = msg.song.body || "";
+    // Same text already on screen (often their own saved copy) — don't jump
+    // back to the top just because the host's copy finished arriving.
+    const same = followRev === msg.rev && followBody === body;
+    followRev = msg.rev;
+    followBody = body;
+    followChartFromHost = true;
+    if (!same) {
       followCursor = null;
       showFollowSong(msg.song);
+    } else if (!followEnded) {
+      jamBannerText.textContent = "Following " + jamCode;
     }
     const queued = pendingPlay;
     pendingPlay = null;
     if (queued && queued.rev === followRev) onJamPlay(queued);
-    closeJamSheet();
+    confirmJoined(msg.song);
     syncJamDataset();
   }
 
   function onJamPlay(msg) {
     if (followEnded || !msg) return;
+    heardHost = true;
+    clearTimeout(jamWaitTimer);
     if (!followRev || msg.rev !== followRev) {
-      pendingPlay = msg;
-      return;
+      const local = Jam.matchLibrary(songs, msg);
+      if (local && msg.rev && msg.rev !== followRev) {
+        followRev = msg.rev;
+        followBody = local.body || "";
+        followChartFromHost = false;
+        followCursor = null;
+        showFollowSong(followSongFromLibrary(local));
+        confirmJoined(local);
+      } else {
+        pendingPlay = msg;
+        showGetting(msg, !!followRev);
+        return;
+      }
     }
     followCursor = Jam.cursorFromSample(followCursor, {
       rev: msg.rev,
@@ -2698,8 +2845,7 @@
       jamBannerText.textContent = "This jam has ended";
       closeJamSheet();
     } else {
-      openJoinSheet(jamCode);
-      jamSheetStatus.textContent = "This jam has ended.";
+      showJoinProblem("This jam has ended.");
     }
     syncJamDataset();
   }
@@ -2710,20 +2856,29 @@
         if (jamSession !== session) return;
         jamLinkStatus = status;
         if (session.role === "host") refreshJamChrome();
-        else if (!followRev && !followEnded) {
-          jamSheetStatus.textContent = status === "reconnecting"
-            ? "Reconnecting…"
-            : "Looking for jam " + jamCode + "…";
-        } else if (!followEnded && followRev) {
+        else if (!followEnded && followRev) {
           jamBannerText.textContent = status === "reconnecting"
             ? "Reconnecting…"
             : "Following " + jamCode;
+        } else if (!followRev && !followEnded && !joinConfirmed && !(heardHost && status === "live")) {
+          showJoining(status === "reconnecting"
+            ? "Reconnecting…"
+            : "Looking for jam " + jamCode + "…");
         }
         syncJamDataset();
       },
       onPeers(n) {
         if (jamSession !== session) return;
+        const prev = jamPeerCount;
         jamPeerCount = n;
+        if (session.role === "host" && n > prev && jamLinkStatus === "live") {
+          jamSomeoneUntil = Date.now() + 2500;
+          clearTimeout(jamSomeoneTimer);
+          jamSomeoneTimer = setTimeout(() => {
+            jamSomeoneUntil = 0;
+            if (jamIsHost()) refreshJamChrome();
+          }, 2500);
+        }
         if (session.role === "host") refreshJamChrome();
       },
       onSong(msg) { if (jamSession === session) onJamSong(msg); },
@@ -2740,8 +2895,12 @@
     clearTimeout(jamWaitTimer);
     jamWaitTimer = setTimeout(() => {
       if (followRev || followEnded || !jamIsFollow()) return;
-      openJoinSheet(jamCode);
-      jamSheetStatus.textContent = "No one's playing on jam " + jamCode + " right now.";
+      if (heardHost) {
+        if (!joinConfirmed) showJoining("Still getting the chart…");
+        armJamWait();
+        return;
+      }
+      showJoinProblem("No one's playing on jam " + jamCode + " right now.");
     }, 10000);
   }
 
@@ -2769,6 +2928,7 @@
       session.publishSong(current);
       jamFlushPlay(true);
       startJamPump();
+      syncNearby();
       if (window.Analytics) {
         window.Analytics.track("jam-start", { song_title: current.title || "" });
       }
@@ -2798,28 +2958,128 @@
     }
     dropFollowQuiet();
     followRev = "";
+    followBody = "";
+    followChartFromHost = false;
+    heardHost = false;
     followCursor = null;
     pendingPlay = null;
     followEnded = false;
     jamTrackedJoin = false;
+    joinConfirmed = false;
     jamCode = code;
     jamLinkStatus = "connecting";
     setJamQuery(code);
-    openJoinSheet(code);
-    jamSheetLead.textContent = "You'll see their chart as soon as they're playing.";
-    jamSheetStatus.textContent = "Looking for jam " + code + "…";
+    showJoining("Looking for jam " + code + "…");
     const session = makeJamSession();
     jamSession = session;
     const gen = ++jamJoinGen;
     armJamWait();
     syncJamDataset();
+    refreshNearbyPrompt();
     try {
       await session.follow(code);
       if (gen !== jamJoinGen || jamSession !== session) return;
     } catch (e) {
       if (gen !== jamJoinGen || jamSession !== session) return;
-      jamSheetStatus.textContent = "Couldn't connect. Check your connection and try again.";
+      showJoinProblem("Couldn't connect. Check your connection and try again.");
     }
+  }
+
+  function deviceId() {
+    const key = "guitarscroll_device";
+    try {
+      const existing = sessionStorage.getItem(key);
+      if (existing) return existing;
+    } catch (e) { /* private mode */ }
+    let id = "";
+    try { id = localStorage.getItem(key) || ""; } catch (e) { /* private mode */ }
+    if (!id) id = Jam.newCode() + Jam.newCode().slice(0, 3);
+    try { localStorage.setItem(key, id); } catch (e) { /* private mode */ }
+    try { sessionStorage.setItem(key, id); } catch (e) { /* private mode */ }
+    return id;
+  }
+
+  function nearbyBlocked() {
+    return jamIsHost() || jamIsFollow() || !!followRev || !jamSheet.hidden;
+  }
+
+  function hideNearbyPrompt() {
+    nearbyOffer = null;
+    jamNearby.hidden = true;
+    clearTimeout(nearbySilenceTimer);
+    nearbySilenceTimer = 0;
+  }
+
+  function refreshNearbyPrompt() {
+    if (nearbyOffer && Date.now() - nearbyOffer.seenAt >= 8000) nearbyOffer = null;
+    if (!nearbyOffer || nearbyDismissed.has(nearbyOffer.code) || nearbyBlocked()) {
+      jamNearby.hidden = true;
+      return;
+    }
+    const title = nearbyOffer.title || "A jam";
+    const artist = nearbyOffer.artist ? " · " + nearbyOffer.artist : "";
+    jamNearbyTitle.textContent = title + artist;
+    jamNearby.hidden = false;
+  }
+
+  function noteNearby(msg) {
+    if (!msg || !msg.code || nearbyDismissed.has(msg.code)) return;
+    if (jamIsHost() && jamCode === msg.code) return;
+    nearbyOffer = {
+      code: msg.code,
+      title: msg.title || "",
+      artist: msg.artist || "",
+      from: msg.from || "",
+      seenAt: Date.now(),
+    };
+    clearTimeout(nearbySilenceTimer);
+    nearbySilenceTimer = setTimeout(() => {
+      if (nearbyOffer && Date.now() - nearbyOffer.seenAt >= 7000) {
+        nearbyOffer = null;
+        jamNearby.hidden = true;
+      }
+    }, 8000);
+    refreshNearbyPrompt();
+  }
+
+  function noteNearbyStop(msg) {
+    if (!nearbyOffer || !msg) return;
+    if (msg.code && msg.code !== nearbyOffer.code) return;
+    if (!msg.code && msg.from && nearbyOffer.from !== msg.from) return;
+    hideNearbyPrompt();
+  }
+
+  function syncNearby() {
+    if (jamIsHost() && jamCode) {
+      const song = songs.find((s) => s.id === currentSongId);
+      nearbyWant = {
+        code: jamCode,
+        title: song ? (song.title || "") : "",
+        artist: song ? (song.artist || "") : "",
+      };
+    } else {
+      nearbyWant = null;
+    }
+    if (nearby) nearby.announce(nearbyWant);
+    refreshNearbyPrompt();
+  }
+
+  function startNearby() {
+    if (!window.Jam || typeof Jam.networkKey !== "function" || typeof Jam.createNearby !== "function") return;
+    const id = deviceId();
+    Jam.networkKey().then((key) => {
+      if (!key || nearby) return;
+      const session = Jam.createNearby({
+        key: key,
+        selfId: id,
+        announceMs: 2000,
+        onNear: noteNearby,
+        onStop: noteNearbyStop,
+      });
+      nearby = session;
+      if (nearbyWant) session.announce(nearbyWant);
+      session.open().catch(() => {});
+    }).catch(() => {});
   }
 
   // ── Event Wiring ──
@@ -2899,6 +3159,14 @@
 
   // Bank the time before the app can be frozen or closed on us
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && jamIsHost()) {
+      const song = songs.find((s) => s.id === currentSongId);
+      if (song) jamSession.publishSong(song);
+      syncNearby();
+      // The chart isn't on screen from the library, and a hidden scroller
+      // reports no height — publishing that would yank followers to the top.
+      if (playerView.classList.contains("active")) jamFlushPlay(true);
+    }
     if (!practiceSongId) return;
     if (document.hidden) {
       // `document.hidden` is already true by the time this event runs, so
@@ -2912,7 +3180,9 @@
     }
   });
   window.addEventListener("pagehide", () => {
-    if (jamIsHost()) endHostJam();
+    // Don't end the jam here. Phones fire this when the screen locks or the
+    // host switches apps to send the code, and ending it left the follower
+    // with nothing to follow.
     if (!practiceSongId) return;
     // visibilitychange already banked the final foreground slice when present.
     if (!document.hidden) creditPracticeTime();
@@ -2951,11 +3221,29 @@
     menuDropdown.classList.add("hidden");
     openJoinSheet("");
   });
+  jamNearbyJoin.addEventListener("click", () => {
+    const code = nearbyOffer && nearbyOffer.code;
+    hideNearbyPrompt();
+    if (code) joinJam(code);
+  });
+  jamNearbyNo.addEventListener("click", () => {
+    if (nearbyOffer) nearbyDismissed.add(nearbyOffer.code);
+    hideNearbyPrompt();
+  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !jamSheet.hidden) closeJamSheet();
   });
   songContent.addEventListener("pointerdown", markHostSeek);
-  songContent.addEventListener("wheel", markHostSeek, { passive: true });
+  songContent.addEventListener("wheel", (e) => {
+    if (jamIsFollow() || followRev) {
+      e.preventDefault();
+      return;
+    }
+    markHostSeek();
+  }, { passive: false });
+  songContent.addEventListener("touchmove", (e) => {
+    if (jamIsFollow() || followRev) e.preventDefault();
+  }, { passive: false });
 
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value.trim();
@@ -3136,11 +3424,22 @@
 
   const jamLink = new URLSearchParams(location.search).get("jam");
   if (jamLink) joinJam(jamLink);
+  startNearby();
 
   // ── Service Worker ──
   // ?nosw=1 skips registration so a reload from a fresh worker can't cut a
-  // jam off mid-test. Real visits always register.
-  if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("nosw")) {
+  // jam off mid-test. An already-installed worker would still serve the old
+  // shell, so drop it too. Real visits always register.
+  if ("serviceWorker" in navigator && new URLSearchParams(location.search).has("nosw")) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      return Promise.all(regs.map((reg) => reg.unregister()));
+    }).then(() => {
+      if (!navigator.serviceWorker.controller) return;
+      if (sessionStorage.getItem("guitarscroll_nosw")) return;
+      sessionStorage.setItem("guitarscroll_nosw", "1");
+      location.reload();
+    }).catch(() => {});
+  } else if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     });

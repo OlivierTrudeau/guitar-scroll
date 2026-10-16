@@ -255,8 +255,22 @@
       <form id="jam-join-block" hidden>
         <input id="jam-code-input" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" placeholder="Jam code" aria-label="Jam code">
         <p id="jam-join-error" class="jam-join-error" hidden></p>
+        <p id="jam-join-status" class="jam-status" hidden></p>
         <button type="submit" id="jam-join-go" class="jam-join-go">Join</button>
       </form>
+      <div id="jam-joined-block" hidden>
+        <p id="jam-joined-text" class="jam-joined-text"></p>
+      </div>
+    </div>
+  </div>
+  <div id="jam-nearby" class="jam-nearby" hidden>
+    <div class="jam-nearby-copy">
+      <div class="jam-nearby-kicker">Jam on this network</div>
+      <div id="jam-nearby-title" class="jam-nearby-title"></div>
+    </div>
+    <div class="jam-nearby-actions">
+      <button type="button" id="jam-nearby-no" class="text-btn">Not now</button>
+      <button type="button" id="jam-nearby-join" class="jam-nearby-join">Join</button>
     </div>
   </div>
   <script src="analytics.js"></script>

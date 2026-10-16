@@ -40,7 +40,7 @@ since nothing displayed them. The tuner's own tuning picker is unaffected.
 
 ## Jam
 
-Open a song and tap **Jam**. You get a short code and a link. Anyone who opens the link — or chooses **⋯ → Join a jam** and types the code — sees the chart you're on and follows your scroll, play, pause, and speed. Go back and open a different song, and they switch with you. The jam keeps running from the library bar until you tap **End**.
+Open a song and tap **Jam**. You get a short code and a link. Anyone who opens the link — or chooses **⋯ → Join a jam** and types the code — sees the chart you're on and follows your scroll, play, pause, and speed. Once they're in, the join screen confirms it and then gets out of the way. Other phones on the same network that have GuitarScroll open are asked if they want to join, so nobody has to read the code out. They don't need the song saved on their phone: the chart is sent with the jam, and a long chart is sent in pieces until it arrives. If they already have it, that copy shows up immediately and is replaced if yours is different. Go back and open a different song, and they switch with you. The jam keeps running from the library bar until you tap **End**. Locking the phone or switching apps to send the code does not end it.
 
 Following needs a connection (the tuner still works offline). GuitarScroll is a static site, so the jam is relayed through a public broker rather than a server of ours. The code is the only thing keeping other people out — share it with the room, not the whole internet.
 
