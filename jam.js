@@ -22,6 +22,10 @@
  * broadcast on the LAN, so each one derives a key from its public address
  * (and the private /24, when WebRTC exposes one) and listens on that topic.
  * A host announces only the code and the song title there — never the chart.
+ *
+ * Followers can also see the rest of the host's library: titles and artists
+ * only, on their own topic, so they know what they could ask for next. Charts
+ * and practice history stay off that list.
  */
 (function (root, factory) {
   var api = factory();
@@ -76,7 +80,7 @@
 
   function jamTopics(code) {
     var base = "gsjam/v1/" + code;
-    return { song: base + "/s", play: base + "/p", here: base + "/h" };
+    return { song: base + "/s", play: base + "/p", here: base + "/h", library: base + "/lib" };
   }
 
   function clamp01(n) {
@@ -98,6 +102,45 @@
       speed: typeof speed === "number" && isFinite(speed) ? speed : null,
       body: String(song.body || ""),
     };
+  }
+
+  // Titles and artists only. Practice notes and chart text stay on the host's phone.
+  function publicCatalog(songs) {
+    var list = [];
+    var src = songs || [];
+    for (var i = 0; i < src.length; i++) {
+      var song = src[i] || {};
+      var id = String(song.id || "");
+      var title = String(song.title || "").trim();
+      if (!id && !title) continue;
+      list.push({
+        id: id,
+        title: title || "Untitled",
+        artist: String(song.artist || "").trim(),
+      });
+    }
+    list.sort(function (a, b) {
+      var at = a.title.toLowerCase();
+      var bt = b.title.toLowerCase();
+      if (at < bt) return -1;
+      if (at > bt) return 1;
+      var aa = a.artist.toLowerCase();
+      var ba = b.artist.toLowerCase();
+      if (aa < ba) return -1;
+      if (aa > ba) return 1;
+      return 0;
+    });
+    return list;
+  }
+
+  function catalogRev(list) {
+    var s = JSON.stringify(list || []);
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(36);
   }
 
   function songRev(song) {
@@ -511,6 +554,10 @@
     var heldRev = "";
     var songHeader = null;
     var chunkBags = Object.create(null);
+    var lastLibrary = null;
+    var libHeader = null;
+    var libBags = Object.create(null);
+    var heldLibRev = "";
     var lastPlaySeq = 0;
     var lastResendAt = 0;
     var resendMs = options.resendMs || 1200;
@@ -597,6 +644,7 @@
       if (now - lastResendAt < resendMs) return;
       transmitSong();
       transmitPlay();
+      transmitLibrary();
     }
 
     function emitPeers() {
@@ -618,7 +666,7 @@
     function startHere() {
       clearInterval(hereTimer);
       var send = function () {
-        write(topics().here, { v: 1, kind: "here", id: selfId, rev: heldRev || "" }, false);
+        write(topics().here, { v: 1, kind: "here", id: selfId, rev: heldRev || "", lib: heldLibRev || "" }, false);
       };
       send();
       hereTimer = setInterval(send, hereMs);
@@ -672,13 +720,14 @@
       if (role === "host") {
         if (topic === t.here && msg.kind === "here") {
           notePeer(msg.id);
-          if (lastSong && msg.rev !== lastSong.rev) maybeResend();
+          if ((lastSong && msg.rev !== lastSong.rev) || (lastLibrary && (msg.lib || "") !== lastLibrary.rev)) maybeResend();
         }
         return;
       }
       if (role !== "follow" || ended) return;
       var chunkTopic = topic.indexOf(t.song + "/") === 0;
-      if (topic !== t.song && topic !== t.play && !chunkTopic) return;
+      var libChunk = topic.indexOf(t.library + "/") === 0;
+      if (topic !== t.song && topic !== t.play && topic !== t.library && !chunkTopic && !libChunk) return;
       if (msg.hostId) {
         if (lockedHost && msg.hostId !== lockedHost) return;
         lockedHost = msg.hostId;
@@ -715,6 +764,78 @@
         if (!chunkBags[msg.rev]) chunkBags[msg.rev] = [];
         chunkBags[msg.rev][msg.i] = String(msg.data == null ? "" : msg.data);
         tryAssemble();
+        return;
+      }
+      if (topic === t.library && msg.kind === "library") {
+        var keptLib = libBags[msg.rev];
+        libHeader = msg;
+        libBags = Object.create(null);
+        if (keptLib) libBags[msg.rev] = keptLib;
+        tryAssembleLibrary();
+        return;
+      }
+      if (libChunk && msg.kind === "libchunk" && msg.rev && typeof msg.i === "number") {
+        if (!libBags[msg.rev]) libBags[msg.rev] = [];
+        libBags[msg.rev][msg.i] = String(msg.data == null ? "" : msg.data);
+        tryAssembleLibrary();
+      }
+    }
+
+    function emitLibrary(rev, songs) {
+      if (!rev || heldLibRev === rev) return;
+      heldLibRev = rev;
+      if (options.onLibrary) {
+        options.onLibrary({ v: 1, kind: "library", hostId: lockedHost, rev: rev, songs: songs });
+      }
+    }
+
+    function tryAssembleLibrary() {
+      if (!libHeader || libHeader.kind !== "library" || !libHeader.rev) return;
+      var rev = libHeader.rev;
+      var n = libHeader.parts || 0;
+      if (!n) {
+        emitLibrary(rev, publicCatalog(libHeader.songs || []));
+        return;
+      }
+      var parts = libBags[rev];
+      if (!parts) return;
+      var json = "";
+      for (var i = 0; i < n; i++) {
+        if (typeof parts[i] !== "string") return;
+        json += parts[i];
+      }
+      var parsed;
+      try { parsed = JSON.parse(json); }
+      catch (e) { return; }
+      if (!Array.isArray(parsed)) return;
+      emitLibrary(rev, publicCatalog(parsed));
+    }
+
+    function transmitLibrary() {
+      if (!lastLibrary || stopped) return;
+      var header = {
+        v: 1,
+        kind: "library",
+        hostId: lastLibrary.hostId,
+        rev: lastLibrary.rev,
+        seq: ++seq,
+        parts: lastLibrary.parts || 0,
+        songs: lastLibrary.songs,
+      };
+      write(topics().library, header, true);
+      var chunks = lastLibrary.chunks;
+      if (!chunks) return;
+      for (var i = 0; i < chunks.length; i++) {
+        write(topics().library + "/" + i, {
+          v: 1,
+          kind: "libchunk",
+          hostId: lastLibrary.hostId,
+          rev: lastLibrary.rev,
+          seq: ++seq,
+          i: i,
+          n: chunks.length,
+          data: chunks[i],
+        }, true);
       }
     }
 
@@ -736,6 +857,10 @@
         return conn.subscribe(t.song + "/#");
       }).then(function () {
         return conn.subscribe(t.play);
+      }).then(function () {
+        return conn.subscribe(t.library);
+      }).then(function () {
+        return conn.subscribe(t.library + "/#");
       });
     }
 
@@ -754,6 +879,7 @@
       if (role === "host") {
         transmitSong();
         transmitPlay();
+        transmitLibrary();
       }
     }
 
@@ -847,10 +973,14 @@
       lockedHost = nextRole === "host" ? hostId : "";
       lastSong = null;
       lastPlay = null;
+      lastLibrary = null;
       peers = new Map();
       heldRev = "";
       songHeader = null;
       chunkBags = Object.create(null);
+      libHeader = null;
+      libBags = Object.create(null);
+      heldLibRev = "";
       lastPlaySeq = 0;
       lastResendAt = 0;
       announced = false;
@@ -892,6 +1022,19 @@
           };
         }
         transmitSong();
+      },
+      publishLibrary: function (songs) {
+        if (role !== "host" || ended || stopped) return;
+        var list = publicCatalog(songs);
+        var rev = catalogRev(list);
+        if (lastLibrary && lastLibrary.rev === rev) return;
+        var pieces = splitChunks(JSON.stringify(list), CHUNK_CHARS);
+        if (pieces.length <= 1) {
+          lastLibrary = { hostId: hostId, rev: rev, parts: 0, songs: list, chunks: null };
+        } else {
+          lastLibrary = { hostId: hostId, rev: rev, parts: pieces.length, songs: [], chunks: pieces };
+        }
+        transmitLibrary();
       },
       publishPlay: function (state) {
         if (role !== "host" || ended || stopped || !lastSong) return;
@@ -1352,6 +1495,7 @@
     normalizeCode: normalizeCode,
     jamTopics: jamTopics,
     publicSong: publicSong,
+    publicCatalog: publicCatalog,
     songRev: songRev,
     splitChunks: splitChunks,
     matchLibrary: matchLibrary,

@@ -132,6 +132,7 @@
       <div id="jam-banner" class="jam-banner" hidden>
         <span class="jam-live-dot" aria-hidden="true"></span>
         <span id="jam-banner-text">Following</span>
+        <button type="button" id="jam-songs-btn" class="text-btn">Songs</button>
         <button type="button" id="jam-leave-btn" class="text-btn">Leave</button>
       </div>
       <div id="song-content" class="song-content"></div>
@@ -261,6 +262,14 @@
       <div id="jam-joined-block" hidden>
         <p id="jam-joined-text" class="jam-joined-text"></p>
       </div>
+    </div>
+  </div>
+  <div id="host-lib-sheet" class="jam-sheet" hidden>
+    <div class="jam-card" role="dialog" aria-modal="true" aria-labelledby="host-lib-title">
+      <h2 id="host-lib-title">Their songs</h2>
+      <p id="host-lib-lead" class="jam-lead"></p>
+      <input id="host-lib-search" type="search" placeholder="Search their songs" aria-label="Search their songs" autocomplete="off" spellcheck="false">
+      <div id="host-lib-list" class="host-lib-list"></div>
     </div>
   </div>
   <div id="jam-nearby" class="jam-nearby" hidden>
