@@ -105,6 +105,21 @@ function concat(a, b, c) {
   assertClose(Jam.progressOf(200, 500, 100), 0.5, "progress halfway");
   assert(Jam.progressOf(999, 500, 100) === 1, "progress clamps");
   assert(Jam.progressOf(10, 80, 100) === 0, "no scroll range");
+
+  const near = Jam.nearKeyFrom("203.0.113.8|192.168.1.0/24");
+  assert(near.length === 8 && Jam.usableNearKey(near) === near, "near key is 8 jam letters");
+  assert(Jam.nearKeyFrom("203.0.113.8|192.168.1.0/24") === near, "near key is stable");
+  assert(Jam.nearKeyFrom("203.0.113.9|192.168.1.0/24") !== near, "near key changes with the address");
+  assert(Jam.nearKeyFrom("") === "", "empty near material is not a key");
+  assert(Jam.usableNearKey("abcd2345") === "ABCD2345", "near key normalizes case");
+  assert(Jam.usableNearKey("ABCD234") === "", "short near key rejected");
+  assert(Jam.usableNearKey("OOOOOOOO") === "", "ambiguous near key rejected");
+  assert(Jam.isPrivateIp("192.168.1.20") === true, "192.168 is private");
+  assert(Jam.isPrivateIp("10.1.2.3") === true, "10/8 is private");
+  assert(Jam.isPrivateIp("172.16.0.1") === true, "172.16 is private");
+  assert(Jam.isPrivateIp("172.15.0.1") === false, "172.15 is not private");
+  assert(Jam.isPrivateIp("8.8.8.8") === false, "public address is not private");
+  assert(Jam.isPrivateIp("phone.local") === false, "mdns name is not a private ip");
 }
 
 // ── Follower cursor ──
@@ -392,12 +407,80 @@ async function liveTest() {
   }
 }
 
+async function nearbyTest() {
+  const overridden = await Jam.networkKey({
+    storage: { getItem: (k) => (k === "guitarscroll_netkey" ? "abcd2345" : null) },
+  });
+  assert(overridden === "ABCD2345", "stored network key skips discovery");
+
+  let rejected = false;
+  try { await Jam.createNearby({ key: "nope", brokers: ["ws://fake"] }).open(); }
+  catch (e) { rejected = true; }
+  assert(rejected, "bad near key is rejected");
+
+  const broker = fakeBroker();
+  const key = Jam.nearKeyFrom("203.0.113.8|192.168.1.0/24");
+  const heard = [];
+  const stopped = [];
+  const echo = [];
+  const other = [];
+  const host = Jam.createNearby({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    key: key,
+    selfId: "HOSTID01",
+    announceMs: 40,
+  });
+  const guest = Jam.createNearby({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    key: key,
+    selfId: "GUESTID1",
+    onNear: (msg) => heard.push(msg),
+    onStop: (msg) => stopped.push(msg),
+  });
+  const samePhone = Jam.createNearby({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    key: key,
+    selfId: "HOSTID01",
+    onNear: (msg) => echo.push(msg),
+  });
+  const elsewhere = Jam.createNearby({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    key: Jam.nearKeyFrom("198.51.100.4|10.0.0.0/24"),
+    selfId: "OTHERID1",
+    onNear: (msg) => other.push(msg),
+  });
+  host.announce({ code: "k7mqp", title: "Kitchen Table", artist: "Ada", body: "should not ride along" });
+  await host.open();
+  await guest.open();
+  await samePhone.open();
+  await elsewhere.open();
+  await waitFor(() => heard.length > 0, 1000);
+  assert(heard[0].code === "K7MQP", "nearby hears the jam code");
+  assert(heard[0].title === "Kitchen Table" && heard[0].artist === "Ada", "nearby hears the song name");
+  assert(!("body" in heard[0]), "nearby announce does not carry the chart");
+  assert(echo.length === 0, "a phone does not offer its own jam");
+  assert(other.length === 0, "a different network does not hear the jam");
+  host.announce({ code: "K7MQP", title: "Second Song", artist: "Bea" });
+  await waitFor(() => heard.some((m) => m.title === "Second Song"), 1000);
+  host.announce(null);
+  await waitFor(() => stopped.some((m) => m.code === "K7MQP"), 1000);
+  host.close();
+  guest.close();
+  samePhone.close();
+  elsewhere.close();
+}
+
 (async () => {
   try {
     await sessionTest();
     await chartWithoutLibrary();
     await playBeforeChart();
     await resendMissedChart();
+    await nearbyTest();
     await liveTest();
   } catch (err) {
     failed++;

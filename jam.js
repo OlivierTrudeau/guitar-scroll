@@ -17,6 +17,11 @@
  * width, so the same chord sits at a different scrollTop on each phone. The
  * host sends progress as a fraction of the chart, and the follower scrolls to
  * that fraction, coasting between packets so the motion stays smooth.
+ *
+ * Phones on the same network can find a jam without the code. Browsers can't
+ * broadcast on the LAN, so each one derives a key from its public address
+ * (and the private /24, when WebRTC exposes one) and listens on that topic.
+ * A host announces only the code and the song title there — never the chart.
  */
 (function (root, factory) {
   var api = factory();
@@ -926,6 +931,420 @@
     };
   }
 
+  function nearKeyFrom(text) {
+    text = String(text || "");
+    if (!text) return "";
+    var h1 = 2166136261;
+    var h2 = 2166136261 ^ 0x811c9dc5;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      h1 ^= c;
+      h1 = Math.imul(h1, 16777619);
+      h2 ^= c;
+      h2 = Math.imul(h2, 16777619);
+    }
+    h1 = h1 >>> 0;
+    h2 = h2 >>> 0;
+    var s = "";
+    var n = ALPHABET.length;
+    for (var a = 0; a < 4; a++) {
+      s += ALPHABET[h1 % n];
+      h1 = Math.floor(h1 / n);
+    }
+    for (var b = 0; b < 4; b++) {
+      s += ALPHABET[h2 % n];
+      h2 = Math.floor(h2 / n);
+    }
+    return s;
+  }
+
+  function usableNearKey(key) {
+    key = String(key || "").trim().toUpperCase();
+    if (key.length !== 8) return "";
+    for (var i = 0; i < key.length; i++) {
+      if (ALPHABET.indexOf(key.charAt(i)) === -1) return "";
+    }
+    return key;
+  }
+
+  function ipv4Parts(ip) {
+    var m = String(ip || "").match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return null;
+    var parts = [+m[1], +m[2], +m[3], +m[4]];
+    for (var i = 0; i < 4; i++) if (parts[i] > 255) return null;
+    return parts;
+  }
+
+  function isPrivateIp(ip) {
+    var p = ipv4Parts(ip);
+    if (!p) return false;
+    if (p[0] === 10) return true;
+    if (p[0] === 192 && p[1] === 168) return true;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;
+    return false;
+  }
+
+  function isPublicIp(ip) {
+    var p = ipv4Parts(ip);
+    if (!p) return false;
+    if (isPrivateIp(ip)) return false;
+    if (p[0] === 0 || p[0] === 127 || p[0] >= 224) return false;
+    if (p[0] === 169 && p[1] === 254) return false;
+    return true;
+  }
+
+  function privatePrefix(ip) {
+    if (!isPrivateIp(ip)) return "";
+    var p = ipv4Parts(ip);
+    return p[0] + "." + p[1] + "." + p[2] + ".0/24";
+  }
+
+  function tracePublicIp() {
+    if (typeof fetch !== "function") return Promise.resolve("");
+    var ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 2500);
+    var opts = ctrl ? { signal: ctrl.signal } : undefined;
+    function read(url, pick) {
+      return fetch(url, opts).then(function (r) { return r.text(); }).then(pick);
+    }
+    return read("https://www.cloudflare.com/cdn-cgi/trace", function (text) {
+      var m = String(text || "").match(/(?:^|\n)ip=([0-9.]+)/);
+      return m && isPublicIp(m[1]) ? m[1] : "";
+    }).catch(function () { return ""; }).then(function (ip) {
+      if (ip) return ip;
+      return read("https://api.ipify.org?format=json", function (text) {
+        var m = String(text || "").match(/"ip"\s*:\s*"([0-9.]+)"/);
+        return m && isPublicIp(m[1]) ? m[1] : "";
+      }).catch(function () { return ""; });
+    }).then(function (ip) {
+      clearTimeout(timer);
+      return ip || "";
+    });
+  }
+
+  function discoverNetwork() {
+    return new Promise(function (resolve) {
+      if (typeof RTCPeerConnection !== "function") {
+        tracePublicIp().then(function (ip) { resolve({ publicIp: ip, privatePrefix: "" }); });
+        return;
+      }
+      var pc;
+      try {
+        pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun.cloudflare.com:3478" },
+          ],
+        });
+      } catch (e) {
+        tracePublicIp().then(function (ip) { resolve({ publicIp: ip, privatePrefix: "" }); });
+        return;
+      }
+      var done = false;
+      var publicIp = "";
+      var prefix = "";
+      function finish() {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { pc.close(); } catch (err) { /* gathering already finished */ }
+        if (publicIp) {
+          resolve({ publicIp: publicIp, privatePrefix: prefix });
+          return;
+        }
+        tracePublicIp().then(function (ip) {
+          resolve({ publicIp: ip || "", privatePrefix: prefix });
+        });
+      }
+      var timer = setTimeout(finish, 2500);
+      pc.onicecandidate = function (ev) {
+        if (!ev.candidate) {
+          finish();
+          return;
+        }
+        var parts = String(ev.candidate.candidate || "").split(" ");
+        var ip = parts[4] || "";
+        var typ = "";
+        for (var i = 0; i < parts.length; i++) {
+          if (parts[i] === "typ" && parts[i + 1]) typ = parts[i + 1];
+        }
+        if ((typ === "srflx" || typ === "host") && isPublicIp(ip) && !publicIp) publicIp = ip;
+        if (typ === "host" && !prefix) prefix = privatePrefix(ip);
+        if (publicIp && prefix) finish();
+      };
+      try {
+        pc.createDataChannel("gs");
+        pc.createOffer().then(function (offer) {
+          return pc.setLocalDescription(offer);
+        }).catch(function () { finish(); });
+      } catch (e2) {
+        finish();
+      }
+    });
+  }
+
+  function networkKey(options) {
+    options = options || {};
+    var storage = options.storage || null;
+    if (!storage && typeof localStorage !== "undefined") {
+      try { storage = localStorage; } catch (e) { storage = null; }
+    }
+    if (storage) {
+      try {
+        var override = usableNearKey(storage.getItem("guitarscroll_netkey"));
+        if (override) return Promise.resolve(override);
+      } catch (e2) { /* private mode */ }
+    }
+    return discoverNetwork().then(function (info) {
+      if (!info || !info.publicIp) return "";
+      var material = info.publicIp;
+      if (info.privatePrefix) material += "|" + info.privatePrefix;
+      return nearKeyFrom(material);
+    });
+  }
+
+  function createNearby(options) {
+    options = options || {};
+    var connect = options.connect || defaultConnect;
+    var brokers = options.brokers || BROKERS.slice();
+    var selfId = options.selfId || randomId(8);
+    var key = usableNearKey(options.key);
+    var announceMs = options.announceMs || 2000;
+    var sockets = [];
+    var retryTimers = [];
+    var epoch = 0;
+    var stopped = true;
+    var announced = false;
+    var info = null;
+    var announceTimer = null;
+    var liveWaiters = [];
+
+    function topic() {
+      return "gsjam/v1/near/" + key;
+    }
+
+    function emitStatus(status) {
+      if (options.onStatus) options.onStatus(status);
+    }
+
+    function failWaiters(err) {
+      var waiters = liveWaiters;
+      liveWaiters = [];
+      for (var i = 0; i < waiters.length; i++) waiters[i].reject(err);
+    }
+
+    function readyWaiters() {
+      var waiters = liveWaiters;
+      liveWaiters = [];
+      for (var i = 0; i < waiters.length; i++) waiters[i].resolve(key);
+    }
+
+    function write(obj) {
+      if (stopped) return false;
+      var payload;
+      try { payload = encodeJson(obj); }
+      catch (e) { return false; }
+      var ok = false;
+      for (var i = 0; i < sockets.length; i++) {
+        var s = sockets[i];
+        if (!s) continue;
+        try {
+          if (s.publish(topic(), payload, false)) ok = true;
+        } catch (e2) { /* that relay is gone */ }
+      }
+      return ok;
+    }
+
+    function transmit() {
+      if (!info || stopped) return;
+      write({
+        v: 1,
+        kind: "near",
+        from: selfId,
+        code: info.code,
+        title: info.title || "",
+        artist: info.artist || "",
+      });
+    }
+
+    function transmitStop(code) {
+      write({ v: 1, kind: "near-stop", from: selfId, code: code || "" });
+    }
+
+    function handle(topicName, bytes) {
+      if (stopped || topicName !== topic()) return;
+      var msg;
+      try { msg = JSON.parse(new TextDecoder().decode(bytes)); }
+      catch (e) { return; }
+      if (!msg || msg.v !== 1 || !msg.from || msg.from === selfId) return;
+      if (msg.kind === "near") {
+        var code = normalizeCode(msg.code);
+        if (!code) return;
+        if (options.onNear) {
+          options.onNear({
+            from: String(msg.from),
+            code: code,
+            title: String(msg.title || ""),
+            artist: String(msg.artist || ""),
+          });
+        }
+        return;
+      }
+      if (msg.kind === "near-stop") {
+        if (options.onStop) {
+          options.onStop({
+            from: String(msg.from),
+            code: normalizeCode(msg.code) || "",
+          });
+        }
+      }
+    }
+
+    function later(fn, ms) {
+      var timer = setTimeout(fn, ms);
+      retryTimers.push(timer);
+      return timer;
+    }
+
+    function clearRetries() {
+      for (var i = 0; i < retryTimers.length; i++) clearTimeout(retryTimers[i]);
+      retryTimers = [];
+    }
+
+    function noteLive() {
+      var first = !announced;
+      announced = true;
+      if (first) {
+        emitStatus("live");
+        readyWaiters();
+      }
+      if (info) {
+        transmit();
+        if (!announceTimer) announceTimer = setInterval(transmit, announceMs);
+      }
+    }
+
+    function noteDrop() {
+      var any = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) any = true;
+      if (!any && announced && !stopped) {
+        announced = false;
+        clearInterval(announceTimer);
+        announceTimer = null;
+        emitStatus("reconnecting");
+      }
+    }
+
+    function connectOne(idx, seenEpoch) {
+      if (stopped || seenEpoch !== epoch) return;
+      connect(brokers[idx], {
+        clientId: "n" + randomId(10),
+        onMessage: function (topicName, payload) {
+          if (seenEpoch !== epoch || stopped) return;
+          handle(topicName, payload);
+        },
+        onClose: function () {
+          if (seenEpoch !== epoch || stopped) return;
+          sockets[idx] = null;
+          noteDrop();
+          later(function () { connectOne(idx, seenEpoch); }, 500);
+        },
+      }).then(function (conn) {
+        if (seenEpoch !== epoch || stopped) {
+          try { conn.close(); } catch (e) { /* replaced */ }
+          return;
+        }
+        return conn.subscribe(topic()).then(function () {
+          if (seenEpoch !== epoch || stopped) {
+            try { conn.close(); } catch (e) { /* left while subscribing */ }
+            return;
+          }
+          sockets[idx] = conn;
+          noteLive();
+        }, function () {
+          try { conn.close(); } catch (e) { /* already closing */ }
+          if (seenEpoch === epoch && !stopped) later(function () { connectOne(idx, seenEpoch); }, 500);
+        });
+      }).catch(function () {
+        if (seenEpoch !== epoch || stopped) return;
+        later(function () { connectOne(idx, seenEpoch); }, 700);
+      });
+    }
+
+    function connectAll() {
+      sockets = new Array(brokers.length);
+      for (var i = 0; i < brokers.length; i++) connectOne(i, epoch);
+    }
+
+    function shutdown() {
+      var busy = false;
+      for (var i = 0; i < sockets.length; i++) if (sockets[i]) busy = true;
+      if (stopped && !busy && liveWaiters.length === 0 && retryTimers.length === 0 && !announceTimer) return;
+      if (info && announced && !stopped) {
+        var code = info.code;
+        info = null;
+        clearInterval(announceTimer);
+        announceTimer = null;
+        transmitStop(code);
+      }
+      stopped = true;
+      epoch++;
+      announced = false;
+      clearRetries();
+      clearInterval(announceTimer);
+      announceTimer = null;
+      var open = sockets;
+      sockets = [];
+      for (var j = 0; j < open.length; j++) {
+        if (!open[j]) continue;
+        try { open[j].close(); } catch (e) { /* already closed */ }
+      }
+      failWaiters(new Error("closed"));
+    }
+
+    return {
+      get key() { return key; },
+      open: function () {
+        if (!key) return Promise.reject(new Error("bad key"));
+        if (!stopped && announced) return Promise.resolve(key);
+        shutdown();
+        stopped = false;
+        announced = false;
+        epoch++;
+        emitStatus("connecting");
+        var promise = new Promise(function (resolve, reject) {
+          liveWaiters.push({ resolve: resolve, reject: reject });
+        });
+        connectAll();
+        return promise;
+      },
+      announce: function (next) {
+        if (!next) {
+          var had = info;
+          info = null;
+          clearInterval(announceTimer);
+          announceTimer = null;
+          if (had && announced && !stopped) transmitStop(had.code);
+          return;
+        }
+        var code = normalizeCode(next.code);
+        if (!code) return;
+        info = {
+          code: code,
+          title: String(next.title || ""),
+          artist: String(next.artist || ""),
+        };
+        if (announced && !stopped) {
+          transmit();
+          if (!announceTimer) announceTimer = setInterval(transmit, announceMs);
+        }
+      },
+      close: function () {
+        shutdown();
+      },
+    };
+  }
+
   return {
     ALPHABET: ALPHABET,
     BROKERS: BROKERS,
@@ -939,6 +1358,10 @@
     progressOf: progressOf,
     cursorFromSample: cursorFromSample,
     targetProgress: targetProgress,
+    nearKeyFrom: nearKeyFrom,
+    usableNearKey: usableNearKey,
+    isPrivateIp: isPrivateIp,
+    networkKey: networkKey,
     encodeConnect: encodeConnect,
     encodePublish: encodePublish,
     encodeSubscribe: encodeSubscribe,
@@ -946,5 +1369,6 @@
     encodeDisconnect: encodeDisconnect,
     createParser: createParser,
     createSession: createSession,
+    createNearby: createNearby,
   };
 });

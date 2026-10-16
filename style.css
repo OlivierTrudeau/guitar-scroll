@@ -1398,3 +1398,58 @@ html, body {
   cursor: pointer;
 }
 .jam-join-go:active { background: var(--accent-dim); }
+.jam-join-go:disabled { opacity: 0.7; cursor: default; }
+#jam-join-status { margin: 0; }
+#jam-joined-block[hidden] { display: none !important; }
+.jam-joined-text {
+  text-align: center;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 0;
+}
+.jam-nearby {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 180;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  background: #221e38;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.jam-nearby[hidden] { display: none !important; }
+.jam-nearby-copy { flex: 1; min-width: 0; }
+.jam-nearby-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.jam-nearby-title {
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jam-nearby-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.jam-nearby-join {
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.jam-nearby-join:active { background: var(--accent-dim); }
