@@ -74,6 +74,11 @@
   const jamBanner = $("#jam-banner");
   const jamBannerText = $("#jam-banner-text");
   const jamLeaveBtn = $("#jam-leave-btn");
+  const jamSongsBtn = $("#jam-songs-btn");
+  const hostLibSheet = $("#host-lib-sheet");
+  const hostLibLead = $("#host-lib-lead");
+  const hostLibSearch = $("#host-lib-search");
+  const hostLibList = $("#host-lib-list");
   const jamHostBar = $("#jam-host-bar");
   const jamHostOpen = $("#jam-host-open");
   const jamHostLabel = $("#jam-host-label");
@@ -173,6 +178,11 @@
   let nearbyOffer = null;
   const nearbyDismissed = new Set();
   let nearbySilenceTimer = 0;
+  let hostCatalog = [];
+  let hostCatalogRev = "";
+  let followSongId = "";
+  let followSongTitle = "";
+  let followSongArtist = "";
 
   // ── Speed multiplier ──
   // A song can carry the speed it's meant to be played at, which the player
@@ -212,6 +222,7 @@
   }
   function saveSongs() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(songs));
+    publishHostLibrary();
   }
 
   function loadPracticeArchive() {
@@ -2690,6 +2701,12 @@
     followEnded = false;
     jamTrackedJoin = false;
     joinConfirmed = false;
+    hostCatalog = [];
+    hostCatalogRev = "";
+    followSongId = "";
+    followSongTitle = "";
+    followSongArtist = "";
+    closeHostLibrary();
     jamCode = "";
     jamLinkStatus = "idle";
     setFollowChrome(false);
@@ -2783,6 +2800,10 @@
     followRev = msg.rev;
     followBody = body;
     followChartFromHost = true;
+    followSongId = msg.song.id || "";
+    followSongTitle = msg.song.title || "";
+    followSongArtist = msg.song.artist || "";
+    if (!hostLibSheet.hidden) renderHostLibrary();
     if (!same) {
       followCursor = null;
       showFollowSong(msg.song);
@@ -2806,6 +2827,10 @@
         followRev = msg.rev;
         followBody = local.body || "";
         followChartFromHost = false;
+        followSongId = local.id || msg.id || "";
+        followSongTitle = local.title || msg.title || "";
+        followSongArtist = local.artist || msg.artist || "";
+        if (!hostLibSheet.hidden) renderHostLibrary();
         followCursor = null;
         showFollowSong(followSongFromLibrary(local));
         confirmJoined(local);
@@ -2883,6 +2908,7 @@
       },
       onSong(msg) { if (jamSession === session) onJamSong(msg); },
       onPlay(msg) { if (jamSession === session) onJamPlay(msg); },
+      onLibrary(msg) { if (jamSession === session) onJamLibrary(msg); },
       onEnd() {
         if (jamSession !== session && !followRev) return;
         onJamEnded(session);
@@ -2926,6 +2952,7 @@
       if (jamSession !== session) return;
       const current = songs.find((s) => s.id === currentSongId) || song;
       session.publishSong(current);
+      session.publishLibrary(songs);
       jamFlushPlay(true);
       startJamPump();
       syncNearby();
@@ -2966,6 +2993,12 @@
     followEnded = false;
     jamTrackedJoin = false;
     joinConfirmed = false;
+    hostCatalog = [];
+    hostCatalogRev = "";
+    followSongId = "";
+    followSongTitle = "";
+    followSongArtist = "";
+    closeHostLibrary();
     jamCode = code;
     jamLinkStatus = "connecting";
     setJamQuery(code);
@@ -3062,6 +3095,63 @@
     }
     if (nearby) nearby.announce(nearbyWant);
     refreshNearbyPrompt();
+  }
+
+  function publishHostLibrary() {
+    if (jamIsHost() && jamSession) jamSession.publishLibrary(songs);
+  }
+
+  function closeHostLibrary() {
+    hostLibSheet.hidden = true;
+  }
+
+  function hostLibIsPlaying(song) {
+    if (followSongId && song.id && song.id === followSongId) return true;
+    const title = (followSongTitle || "").trim().toLowerCase();
+    const artist = (followSongArtist || "").trim().toLowerCase();
+    if (!title) return false;
+    return (song.title || "").trim().toLowerCase() === title
+      && (song.artist || "").trim().toLowerCase() === artist;
+  }
+
+  function renderHostLibrary() {
+    const n = hostCatalog.length;
+    if (!hostCatalogRev) hostLibLead.textContent = "Getting their songs…";
+    else if (!n) hostLibLead.textContent = "Their library is empty.";
+    else hostLibLead.textContent = n + (n === 1 ? " song" : " songs") + " in their library. The one playing is marked.";
+    hostLibSearch.hidden = !n;
+    if (!n) {
+      hostLibList.innerHTML = "";
+      return;
+    }
+    const q = hostLibSearch.value.trim().toLowerCase();
+    const items = hostCatalog.filter((song) => {
+      if (!q) return true;
+      return ((song.title || "") + " " + (song.artist || "")).toLowerCase().indexOf(q) !== -1;
+    });
+    if (!items.length) {
+      hostLibList.innerHTML = '<p class="host-lib-empty">No songs match.</p>';
+      return;
+    }
+    hostLibList.innerHTML = items.map((song) => {
+      const playing = hostLibIsPlaying(song);
+      const artist = song.artist ? `<div class="host-lib-artist">${esc(song.artist)}</div>` : `<div class="host-lib-artist"></div>`;
+      const mark = playing ? '<span class="host-lib-now">Playing</span>' : "";
+      return `<div class="host-lib-item${playing ? " is-playing" : ""}"><div class="host-lib-title">${esc(song.title || "Untitled")}</div>${artist}${mark}</div>`;
+    }).join("");
+  }
+
+  function openHostLibrary() {
+    if (!(jamIsFollow() || followRev)) return;
+    hostLibSheet.hidden = false;
+    renderHostLibrary();
+  }
+
+  function onJamLibrary(msg) {
+    if (!msg || !msg.rev || msg.rev === hostCatalogRev) return;
+    hostCatalogRev = msg.rev;
+    hostCatalog = Array.isArray(msg.songs) ? msg.songs : [];
+    if (!hostLibSheet.hidden) renderHostLibrary();
   }
 
   function startNearby() {
@@ -3162,6 +3252,7 @@
     if (!document.hidden && jamIsHost()) {
       const song = songs.find((s) => s.id === currentSongId);
       if (song) jamSession.publishSong(song);
+      jamSession.publishLibrary(songs);
       syncNearby();
       // The chart isn't on screen from the library, and a hidden scroller
       // reports no height — publishing that would yank followers to the top.
@@ -3209,6 +3300,10 @@
   jamHostEnd.addEventListener("click", () => endHostJam());
   jamEndBtn.addEventListener("click", () => endHostJam());
   jamLeaveBtn.addEventListener("click", () => leaveFollow());
+  jamSongsBtn.addEventListener("click", () => openHostLibrary());
+  hostLibSearch.addEventListener("input", () => renderHostLibrary());
+  hostLibSheet.addEventListener("click", () => closeHostLibrary());
+  hostLibSheet.querySelector(".jam-card").addEventListener("click", (e) => e.stopPropagation());
   jamCopyBtn.addEventListener("click", () => copyJamLink());
   jamShareBtn.addEventListener("click", () => shareJam());
   jamSheet.addEventListener("click", () => closeJamSheet());
@@ -3231,7 +3326,9 @@
     hideNearbyPrompt();
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !jamSheet.hidden) closeJamSheet();
+    if (e.key !== "Escape") return;
+    if (!hostLibSheet.hidden) { closeHostLibrary(); return; }
+    if (!jamSheet.hidden) closeJamSheet();
   });
   songContent.addEventListener("pointerdown", markHostSeek);
   songContent.addEventListener("wheel", (e) => {

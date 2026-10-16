@@ -101,6 +101,16 @@ function concat(a, b, c) {
   assert(Jam.matchLibrary(lib, { id: "b", title: "Nope", artist: "" }).id === "b", "id match wins");
   assert(Jam.matchLibrary(lib, { title: "Missing", artist: "X" }) == null, "unknown song is not in the library");
 
+  const catalog = Jam.publicCatalog([
+    { id: "b", title: "Zed", artist: "Bee", body: "secret chart", practiceLog: [1], proficiency: 4 },
+    { id: "a", title: "Alpha", artist: "Ann", body: "also secret" },
+    { title: "", id: "" },
+  ]);
+  assert(catalog.length === 2, "blank catalog rows are dropped");
+  assert(catalog[0].title === "Alpha" && catalog[1].title === "Zed", "catalog is sorted by title");
+  assert(!("body" in catalog[1]) && !("practiceLog" in catalog[1]) && !("proficiency" in catalog[1]), "catalog is titles and artists only");
+  assert(catalog[1].artist === "Bee", "catalog keeps the artist");
+
   assert(Jam.progressOf(0, 500, 100) === 0, "progress at top");
   assertClose(Jam.progressOf(200, 500, 100), 0.5, "progress halfway");
   assert(Jam.progressOf(999, 500, 100) === 1, "progress clamps");
@@ -407,6 +417,55 @@ async function liveTest() {
   }
 }
 
+async function libraryTest() {
+  const broker = fakeBroker();
+  const seen = [];
+  const code = "K7MQP";
+  const host = Jam.createSession({ connect: broker.connect, brokers: ["ws://fake"], resendMs: 20 });
+  let drop = 1;
+  const follow = Jam.createSession({
+    connect: (url, opts) => broker.connect(url, Object.assign({}, opts, {
+      onMessage(topic, payload) {
+        if (drop && topic.endsWith("/lib")) {
+          drop--;
+          return;
+        }
+        opts.onMessage(topic, payload);
+      },
+    })),
+    brokers: ["ws://fake"],
+    hereMs: 20,
+    onLibrary: (msg) => seen.push(msg),
+  });
+  await host.host(code);
+  await follow.follow(code);
+  host.publishLibrary([
+    { id: "1", title: "Maybe I'm Wrong", artist: "Kid Laroi", body: "C\nsecret", practiceLog: [9] },
+    { id: "2", title: "On Va S'aimer Encore", artist: "Vincent Vallières", body: "Am" },
+  ]);
+  await waitFor(() => seen.length > 0 && seen[0].songs.length === 2, 1000);
+  assert(drop === 0, "a missed song list is sent again");
+  assert(seen[0].songs[0].title === "Maybe I'm Wrong", "catalog stays sorted");
+  assert(!("body" in seen[0].songs[0]) && !("practiceLog" in seen[0].songs[0]), "follower catalog has no chart or practice log");
+  const before = seen.length;
+  host.publishLibrary([
+    { id: "1", title: "Maybe I'm Wrong", artist: "Kid Laroi", body: "changed chart" },
+    { id: "2", title: "On Va S'aimer Encore", artist: "Vincent Vallières" },
+  ]);
+  await delay(40);
+  assert(seen.length === before, "an unchanged title list is not sent again");
+
+  const wide = [];
+  for (let i = 0; i < 80; i++) {
+    wide.push({ id: "s" + i, title: "Song " + String(i).padStart(3, "0") + " " + "x".repeat(80), artist: "Artist " + i, body: "nope" });
+  }
+  host.publishLibrary(wide);
+  await waitFor(() => seen.some((m) => m.songs.length === 80 && m.songs[79].title.indexOf("Song 079") === 0), 1000);
+  assert(seen.find((m) => m.songs.length === 80).songs.every((s) => !("body" in s)), "a long catalog stays titles only");
+  host.close();
+  follow.close();
+}
+
 async function nearbyTest() {
   const overridden = await Jam.networkKey({
     storage: { getItem: (k) => (k === "guitarscroll_netkey" ? "abcd2345" : null) },
@@ -480,6 +539,7 @@ async function nearbyTest() {
     await chartWithoutLibrary();
     await playBeforeChart();
     await resendMissedChart();
+    await libraryTest();
     await nearbyTest();
     await liveTest();
   } catch (err) {
