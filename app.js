@@ -145,6 +145,9 @@
   let jamJoinGen = 0;
   let jamTrackedJoin = false;
   let followRev = "";
+  let followBody = "";
+  let followChartFromHost = false;
+  let heardHost = false;
   let followCursor = null;
   let pendingPlay = null;
   let followEnded = false;
@@ -2462,7 +2465,7 @@
     jamSheetMode = "host";
     jamSheet.hidden = false;
     jamSheetTitle.textContent = "Jam";
-    jamSheetLead.textContent = "Anyone with this code follows the song you're playing — the chart, the scroll, and the speed.";
+    jamSheetLead.textContent = "Anyone with this code follows along, even if they don't have the song saved. They get the chart, the scroll, and the speed.";
     jamCodeBlock.hidden = false;
     jamJoinBlock.hidden = true;
     jamCodeEl.textContent = jamCode;
@@ -2585,6 +2588,9 @@
     jamJoinGen++;
     dropFollowQuiet();
     followRev = "";
+    followBody = "";
+    followChartFromHost = false;
+    heardHost = false;
     followCursor = null;
     pendingPlay = null;
     followEnded = false;
@@ -2642,18 +2648,51 @@
     followEnded = false;
   }
 
+  function followSongFromLibrary(song) {
+    return {
+      id: song.id,
+      title: song.title || "",
+      artist: song.artist || "",
+      capo: song.capo || "",
+      strum: song.strum || "",
+      speed: song.speed,
+      body: song.body || "",
+    };
+  }
+
+  function showGetting(msg, switching) {
+    const title = (msg && msg.title) || (msg && msg.song && msg.song.title) || "";
+    const line = title ? "Getting " + title + "…" : "Getting the chart…";
+    if (switching && followRev) {
+      jamBannerText.textContent = line;
+      return;
+    }
+    if (jamSheet.hidden) openJoinSheet(jamCode);
+    jamSheetLead.textContent = "You don't need this song saved. It comes from whoever is playing.";
+    jamSheetStatus.textContent = line;
+  }
+
   function onJamSong(msg) {
     if (!msg || !msg.song || !msg.rev) return;
+    heardHost = true;
     clearTimeout(jamWaitTimer);
     showJoinError("");
     if (!jamTrackedJoin) {
       jamTrackedJoin = true;
       if (window.Analytics) window.Analytics.track("jam-join", { song_title: msg.song.title || "" });
     }
-    if (msg.rev !== followRev) {
-      followRev = msg.rev;
+    const body = msg.song.body || "";
+    // Same text already on screen (often their own saved copy) — don't jump
+    // back to the top just because the host's copy finished arriving.
+    const same = followRev === msg.rev && followBody === body;
+    followRev = msg.rev;
+    followBody = body;
+    followChartFromHost = true;
+    if (!same) {
       followCursor = null;
       showFollowSong(msg.song);
+    } else if (!followEnded) {
+      jamBannerText.textContent = "Following " + jamCode;
     }
     const queued = pendingPlay;
     pendingPlay = null;
@@ -2664,9 +2703,22 @@
 
   function onJamPlay(msg) {
     if (followEnded || !msg) return;
+    heardHost = true;
+    clearTimeout(jamWaitTimer);
     if (!followRev || msg.rev !== followRev) {
-      pendingPlay = msg;
-      return;
+      const local = Jam.matchLibrary(songs, msg);
+      if (local && msg.rev && msg.rev !== followRev) {
+        followRev = msg.rev;
+        followBody = local.body || "";
+        followChartFromHost = false;
+        followCursor = null;
+        showFollowSong(followSongFromLibrary(local));
+        closeJamSheet();
+      } else {
+        pendingPlay = msg;
+        showGetting(msg, !!followRev);
+        return;
+      }
     }
     followCursor = Jam.cursorFromSample(followCursor, {
       rev: msg.rev,
@@ -2710,7 +2762,7 @@
         if (jamSession !== session) return;
         jamLinkStatus = status;
         if (session.role === "host") refreshJamChrome();
-        else if (!followRev && !followEnded) {
+        else if (!followRev && !followEnded && !(heardHost && status === "live")) {
           jamSheetStatus.textContent = status === "reconnecting"
             ? "Reconnecting…"
             : "Looking for jam " + jamCode + "…";
@@ -2740,6 +2792,12 @@
     clearTimeout(jamWaitTimer);
     jamWaitTimer = setTimeout(() => {
       if (followRev || followEnded || !jamIsFollow()) return;
+      if (heardHost) {
+        openJoinSheet(jamCode);
+        jamSheetStatus.textContent = "Still getting the chart…";
+        armJamWait();
+        return;
+      }
       openJoinSheet(jamCode);
       jamSheetStatus.textContent = "No one's playing on jam " + jamCode + " right now.";
     }, 10000);
@@ -2798,6 +2856,9 @@
     }
     dropFollowQuiet();
     followRev = "";
+    followBody = "";
+    followChartFromHost = false;
+    heardHost = false;
     followCursor = null;
     pendingPlay = null;
     followEnded = false;
@@ -2806,7 +2867,7 @@
     jamLinkStatus = "connecting";
     setJamQuery(code);
     openJoinSheet(code);
-    jamSheetLead.textContent = "You'll see their chart as soon as they're playing.";
+    jamSheetLead.textContent = "You'll get their chart even if it's not in your library.";
     jamSheetStatus.textContent = "Looking for jam " + code + "…";
     const session = makeJamSession();
     jamSession = session;
@@ -2899,6 +2960,13 @@
 
   // Bank the time before the app can be frozen or closed on us
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && jamIsHost()) {
+      const song = songs.find((s) => s.id === currentSongId);
+      if (song) jamSession.publishSong(song);
+      // The chart isn't on screen from the library, and a hidden scroller
+      // reports no height — publishing that would yank followers to the top.
+      if (playerView.classList.contains("active")) jamFlushPlay(true);
+    }
     if (!practiceSongId) return;
     if (document.hidden) {
       // `document.hidden` is already true by the time this event runs, so
@@ -2912,7 +2980,9 @@
     }
   });
   window.addEventListener("pagehide", () => {
-    if (jamIsHost()) endHostJam();
+    // Don't end the jam here. Phones fire this when the screen locks or the
+    // host switches apps to send the code, and ending it left the follower
+    // with nothing to follow.
     if (!practiceSongId) return;
     // visibilitychange already banked the final foreground slice when present.
     if (!document.hidden) creditPracticeTime();
@@ -2955,7 +3025,16 @@
     if (e.key === "Escape" && !jamSheet.hidden) closeJamSheet();
   });
   songContent.addEventListener("pointerdown", markHostSeek);
-  songContent.addEventListener("wheel", markHostSeek, { passive: true });
+  songContent.addEventListener("wheel", (e) => {
+    if (jamIsFollow() || followRev) {
+      e.preventDefault();
+      return;
+    }
+    markHostSeek();
+  }, { passive: false });
+  songContent.addEventListener("touchmove", (e) => {
+    if (jamIsFollow() || followRev) e.preventDefault();
+  }, { passive: false });
 
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value.trim();

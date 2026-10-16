@@ -89,6 +89,18 @@ function concat(a, b, c) {
   assert(Jam.songRev(song) === Jam.songRev(pub), "rev ignores private fields");
   assert(Jam.songRev(song) !== Jam.songRev(Object.assign({}, song, { body: "C\nHo" })), "rev changes with the chart");
 
+  const pieces = Jam.splitChunks("a".repeat(5999) + "🎸" + "b".repeat(80), 6000);
+  assert(pieces.length === 2, "long chart splits, got " + pieces.length);
+  assert(pieces.join("") === "a".repeat(5999) + "🎸" + "b".repeat(80), "split keeps the emoji intact");
+
+  const lib = [
+    { id: "a", title: "On Va S'aimer Encore", artist: "Vincent Vallières", body: "Am" },
+    { id: "b", title: "Other", artist: "X", body: "G" },
+  ];
+  assert(Jam.matchLibrary(lib, { title: "On Va S'aimer Encore", artist: "Vincent Vallieres" }).id === "a", "title match ignores accents");
+  assert(Jam.matchLibrary(lib, { id: "b", title: "Nope", artist: "" }).id === "b", "id match wins");
+  assert(Jam.matchLibrary(lib, { title: "Missing", artist: "X" }) == null, "unknown song is not in the library");
+
   assert(Jam.progressOf(0, 500, 100) === 0, "progress at top");
   assertClose(Jam.progressOf(200, 500, 100), 0.5, "progress halfway");
   assert(Jam.progressOf(999, 500, 100) === 1, "progress clamps");
@@ -123,12 +135,29 @@ function concat(a, b, c) {
 }
 
 // ── Two sessions, one in-process broker ──
+function mqttMatch(filter, topic) {
+  if (filter === topic) return true;
+  const f = filter.split("/");
+  const t = topic.split("/");
+  for (let i = 0; i < f.length; i++) {
+    if (f[i] === "#") return true;
+    if (i >= t.length) return false;
+    if (f[i] !== "+" && f[i] !== t[i]) return false;
+  }
+  return f.length === t.length;
+}
+
 function fakeBroker() {
   const retained = new Map();
   const clients = [];
   function deliver(topic, payload) {
     for (const client of clients) {
-      if (client.subs.has(topic) && client.opts.onMessage) client.opts.onMessage(topic, payload);
+      for (const filter of client.subs) {
+        if (mqttMatch(filter, topic) && client.opts.onMessage) {
+          client.opts.onMessage(topic, payload);
+          break;
+        }
+      }
     }
   }
   function connect(_url, opts) {
@@ -143,7 +172,11 @@ function fakeBroker() {
       },
       subscribe(topic) {
         this.subs.add(topic);
-        if (retained.has(topic)) this.opts.onMessage(topic, retained.get(topic));
+        for (const [retainedTopic, payload] of retained) {
+          if (mqttMatch(topic, retainedTopic) && this.opts.onMessage) {
+            this.opts.onMessage(retainedTopic, payload);
+          }
+        }
         return Promise.resolve();
       },
       close() {
@@ -165,11 +198,13 @@ async function sessionTest() {
   const code = "K7MQP";
   const host = Jam.createSession({
     connect: broker.connect,
+    brokers: ["ws://fake"],
     onPeers: (n) => { peers = n; },
     peerTtl: 8000,
   });
   const follow = Jam.createSession({
     connect: broker.connect,
+    brokers: ["ws://fake"],
     hereMs: 20,
     onSong: (msg) => seen.push(msg),
     onPlay: (msg) => seen.push(msg),
@@ -209,6 +244,99 @@ async function sessionTest() {
   assert(host.role === "idle", "host session stops");
 }
 
+async function chartWithoutLibrary() {
+  const broker = fakeBroker();
+  const seen = [];
+  const code = "K7MQP";
+  const body = "a".repeat(5999) + "🎸" + "b".repeat(4000) + "\nonly on the host phone";
+  const host = Jam.createSession({ connect: broker.connect, brokers: ["ws://fake"] });
+  const follow = Jam.createSession({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    onSong: (msg) => seen.push(msg),
+    onPlay: (msg) => seen.push(msg),
+  });
+  await host.host(code);
+  await follow.follow(code);
+  host.publishSong({
+    id: "host-only",
+    title: "Not In Your Library",
+    artist: "Host",
+    capo: "2nd fret",
+    strum: "D DU",
+    speed: 6,
+    body: body,
+  });
+  host.publishPlay({ playing: true, speed: 6, progress: 0.42, ts: 5000 });
+  await delay(40);
+  const song = seen.find((m) => m.kind === "song");
+  assert(song && song.song.body === body, "follower receives a long chart they don't have saved");
+  assert(song && song.song.title === "Not In Your Library" && song.song.capo === "2nd fret", "chart title and capo come with it");
+  const play = seen.find((m) => m.kind === "play");
+  assert(play && play.title === "Not In Your Library" && play.id === "host-only", "play updates name the song");
+  host.close();
+  follow.close();
+}
+
+// A play packet is small and often arrives before the chart. It must not
+// make the chart unreadable.
+async function playBeforeChart() {
+  const broker = fakeBroker();
+  const seen = [];
+  const code = "K7MQP";
+  const follow = Jam.createSession({
+    connect: broker.connect,
+    brokers: ["ws://fake"],
+    onSong: (msg) => seen.push(msg),
+    onPlay: (msg) => seen.push(msg),
+  });
+  await follow.follow(code);
+  const topics = Jam.jamTopics(code);
+  const raw = await broker.connect("ws://fake", { onMessage() {} });
+  raw.publish(topics.play, JSON.stringify({
+    v: 1, kind: "play", hostId: "H", seq: 50, rev: "r1",
+    playing: true, progress: 0.2, speed: 4, ts: 1,
+    id: "x", title: "Remote Only", artist: "Z",
+  }), false);
+  raw.publish(topics.song, JSON.stringify({
+    v: 1, kind: "song", hostId: "H", seq: 1, parts: 0, rev: "r1",
+    song: { id: "x", title: "Remote Only", artist: "Z", capo: "", strum: "", speed: 4, body: "C\nonly on the host" },
+  }), false);
+  await delay(30);
+  assert(seen.some((m) => m.kind === "song" && m.song.body === "C\nonly on the host"), "a play packet cannot drop the chart");
+  assert(seen.some((m) => m.kind === "play" && m.progress === 0.2), "the early play packet is kept");
+  follow.close();
+}
+
+async function resendMissedChart() {
+  const broker = fakeBroker();
+  const seen = [];
+  const code = "K7MQP";
+  let drop = 1;
+  const host = Jam.createSession({ connect: broker.connect, brokers: ["ws://fake"], resendMs: 20 });
+  const follow = Jam.createSession({
+    brokers: ["ws://fake"],
+    connect: (url, opts) => broker.connect(url, Object.assign({}, opts, {
+      onMessage(topic, payload) {
+        if (drop && topic.endsWith("/s")) {
+          drop--;
+          return;
+        }
+        opts.onMessage(topic, payload);
+      },
+    })),
+    hereMs: 20,
+    onSong: (msg) => seen.push(msg),
+  });
+  await host.host(code);
+  await follow.follow(code);
+  host.publishSong({ id: "m", title: "Missed Once", artist: "Host", capo: "", strum: "", speed: null, body: "D\ntry again" });
+  await waitFor(() => seen.some((m) => m.kind === "song" && m.song.title === "Missed Once" && m.song.body === "D\ntry again"), 1000);
+  assert(drop === 0, "the first chart copy was the one that got lost");
+  host.close();
+  follow.close();
+}
+
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -246,16 +374,17 @@ async function liveTest() {
   try {
     await Promise.race([
       (async () => {
+        const liveBody = "G\nhello from the jam\n" + ("C\nonly the host has this line " + "x".repeat(40) + "\n").repeat(200);
         await follow.follow(code);
         await host.host(code);
-        host.publishSong({ id: "live", title: "Live Song", artist: "Tester", capo: "", strum: "", speed: 4, body: "G\nhello from the jam" });
+        host.publishSong({ id: "live", title: "Live Song", artist: "Tester", capo: "", strum: "", speed: 4, body: liveBody });
         host.publishPlay({ playing: true, speed: 4, progress: 0.4, ts: Date.now() });
-        await waitFor(() => got.some((m) => m.kind === "song" && m.song.title === "Live Song"), 12000);
+        await waitFor(() => got.some((m) => m.kind === "song" && m.song.title === "Live Song" && m.song.body === liveBody), 12000);
         await waitFor(() => got.some((m) => m.kind === "play" && m.playing && m.progress === 0.4), 8000);
         host.end();
         await waitFor(() => ended, 8000);
       })(),
-      delay(20000).then(() => { throw new Error("live jam timed out, host=" + hostStatus + " follow=" + followStatus); }),
+      delay(35000).then(() => { throw new Error("live jam timed out, host=" + hostStatus + " follow=" + followStatus); }),
     ]);
   } finally {
     try { host.close(); } catch (e) { /* already ended */ }
@@ -266,6 +395,9 @@ async function liveTest() {
 (async () => {
   try {
     await sessionTest();
+    await chartWithoutLibrary();
+    await playBeforeChart();
+    await resendMissedChart();
     await liveTest();
   } catch (err) {
     failed++;

@@ -1284,8 +1284,9 @@ html, body {
   white-space: nowrap;
 }
 .song-content.jam-follow {
-  overflow-y: hidden;
+  overflow-y: auto;
   touch-action: none;
+  overscroll-behavior: none;
 }
 .scroll-controls.is-locked .ctrl-btn {
   opacity: 0.4;
