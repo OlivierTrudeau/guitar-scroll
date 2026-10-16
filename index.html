@@ -26,9 +26,17 @@
         <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
       </header>
       <div id="menu-dropdown" class="menu-dropdown hidden">
+        <button id="join-jam-btn" class="menu-item">Join a jam</button>
         <button id="export-btn" class="menu-item">Export backup</button>
         <button id="import-btn" class="menu-item">Import backup</button>
         <input id="import-file" type="file" accept=".json" hidden>
+      </div>
+      <div id="jam-host-bar" class="jam-host-bar" hidden>
+        <button type="button" id="jam-host-open" class="jam-host-open">
+          <span class="jam-live-dot" aria-hidden="true"></span>
+          <span id="jam-host-label">Jam</span>
+        </button>
+        <button type="button" id="jam-host-end" class="jam-text-end">End</button>
       </div>
       <div class="filter-bar">
         <div class="search-row">
@@ -117,9 +125,15 @@
           <h1 id="player-song-title"></h1>
           <span id="player-song-artist" class="artist-sub"></span>
         </div>
+        <button id="jam-btn" class="text-btn" type="button" aria-label="Start a jam">Jam</button>
         <button id="edit-current-btn" class="icon-btn" aria-label="Edit">✎</button>
       </header>
       <div id="song-meta" class="song-meta"></div>
+      <div id="jam-banner" class="jam-banner" hidden>
+        <span class="jam-live-dot" aria-hidden="true"></span>
+        <span id="jam-banner-text">Following</span>
+        <button type="button" id="jam-leave-btn" class="text-btn">Leave</button>
+      </div>
       <div id="song-content" class="song-content"></div>
       <div id="scroll-controls" class="scroll-controls">
         <button id="scroll-slower" class="ctrl-btn">−</button>
@@ -224,8 +238,30 @@
     </div>
 
   </div>
+
+  <div id="jam-sheet" class="jam-sheet" hidden>
+    <div class="jam-card" role="dialog" aria-modal="true" aria-labelledby="jam-sheet-title">
+      <h2 id="jam-sheet-title">Jam</h2>
+      <p id="jam-sheet-lead" class="jam-lead"></p>
+      <div id="jam-code-block">
+        <div id="jam-code" class="jam-code"></div>
+        <p id="jam-sheet-status" class="jam-status" aria-live="polite"></p>
+        <div class="jam-actions">
+          <button type="button" id="jam-copy-btn" class="text-btn">Copy link</button>
+          <button type="button" id="jam-share-btn" class="text-btn">Share</button>
+        </div>
+        <button type="button" id="jam-end-btn" class="jam-end-btn">End jam</button>
+      </div>
+      <form id="jam-join-block" hidden>
+        <input id="jam-code-input" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="120" placeholder="Jam code" aria-label="Jam code">
+        <p id="jam-join-error" class="jam-join-error" hidden></p>
+        <button type="submit" id="jam-join-go" class="jam-join-go">Join</button>
+      </form>
+    </div>
+  </div>
   <script src="analytics.js"></script>
   <script src="pitch.js"></script>
+  <script src="jam.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

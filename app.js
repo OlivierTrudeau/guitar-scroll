@@ -38,6 +38,7 @@
   const editCurrentBtn = $("#edit-current-btn");
   const songMeta = $("#song-meta");
   const songContent = $("#song-content");
+  const scrollControls = $("#scroll-controls");
   const scrollToggle = $("#scroll-toggle");
   const scrollSlower = $("#scroll-slower");
   const scrollFaster = $("#scroll-faster");
@@ -69,6 +70,27 @@
   const exportBtn = $("#export-btn");
   const importBtn = $("#import-btn");
   const importFile = $("#import-file");
+  const jamBtn = $("#jam-btn");
+  const jamBanner = $("#jam-banner");
+  const jamBannerText = $("#jam-banner-text");
+  const jamLeaveBtn = $("#jam-leave-btn");
+  const jamHostBar = $("#jam-host-bar");
+  const jamHostOpen = $("#jam-host-open");
+  const jamHostLabel = $("#jam-host-label");
+  const jamHostEnd = $("#jam-host-end");
+  const jamSheet = $("#jam-sheet");
+  const jamSheetTitle = $("#jam-sheet-title");
+  const jamSheetLead = $("#jam-sheet-lead");
+  const jamCodeBlock = $("#jam-code-block");
+  const jamCodeEl = $("#jam-code");
+  const jamSheetStatus = $("#jam-sheet-status");
+  const jamCopyBtn = $("#jam-copy-btn");
+  const jamShareBtn = $("#jam-share-btn");
+  const jamEndBtn = $("#jam-end-btn");
+  const jamJoinBlock = $("#jam-join-block");
+  const jamCodeInput = $("#jam-code-input");
+  const jamJoinError = $("#jam-join-error");
+  const joinJamBtn = $("#join-jam-btn");
   // Global practice calendar view
   const statsView = $("#stats-view");
   const statsBackBtn = $("#stats-back-btn");
@@ -113,6 +135,24 @@
   let activeFilterLevel = "all";
   let activeSort = "default";
   let searchQuery = "";
+  let jamSession = null;
+  let jamCode = "";
+  let jamLinkStatus = "idle";
+  let jamPeerCount = 0;
+  let jamSheetMode = "join";
+  let jamStarting = false;
+  let jamHostSeek = false;
+  let jamJoinGen = 0;
+  let jamTrackedJoin = false;
+  let followRev = "";
+  let followCursor = null;
+  let pendingPlay = null;
+  let followEnded = false;
+  let followRAF = 0;
+  let playPump = null;
+  let jamWaitTimer = null;
+  let lastSentPlayKey = "";
+  let lastSentPlayAt = 0;
 
   // ── Speed multiplier ──
   // A song can carry the speed it's meant to be played at, which the player
@@ -1187,35 +1227,54 @@
   }
 
   // ── Player ──
-  function openPlayer(id) {
-    const song = songs.find((s) => s.id === id);
-    if (!song) return;
-    currentSongId = id;
-    playerSongTitle.textContent = song.title;
-    playerSongArtist.textContent = song.artist;
+  // opts.follow renders a chart that isn't in this phone's library (someone
+  // else's jam). opts.deferShow lets the caller publish the new chart before
+  // showView() stops the scroller, so followers don't get a pause for the
+  // previous song after the new one.
+  function renderSong(song, opts) {
+    opts = opts || {};
+    currentSongId = song.id || null;
+    playerSongTitle.textContent = song.title || "Untitled";
+    playerSongArtist.textContent = song.artist || "";
 
     // A song that knows its speed opens ready to play at it; the rest fall back
     // to the default rather than inheriting the previous song's speed.
     applySpeed(song.speed || DEFAULT_SPEED);
 
     songMeta.innerHTML = "";
-    if (song.speed) songMeta.innerHTML += `<span class="meta-tag"><strong>Speed:</strong> ${esc(formatSpeed(song.speed))}</span>`;
     if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo:</strong> ${esc(song.capo)}</span>`;
-    const rusty = isRusty(song.lastPlayed);
-    songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
+    if (!opts.follow && song.speed) {
+      songMeta.innerHTML += `<span class="meta-tag"><strong>Speed:</strong> ${esc(formatSpeed(song.speed))}</span>`;
+    }
+    if (!opts.follow) {
+      const rusty = isRusty(song.lastPlayed);
+      songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
+    }
 
     let contentHTML = "";
     if (song.strum) {
       contentHTML += `<span class="strum-pattern">Strum: ${esc(song.strum)}</span>`;
     }
-    const parsed = parseBody(song.body || "");
-    contentHTML += renderParsed(parsed);
+    contentHTML += renderParsed(parseBody(song.body || ""));
     songContent.innerHTML = contentHTML;
-    songContent.scrollTop = 0;
+    if (!opts.keepScroll) songContent.scrollTop = 0;
+    setFollowChrome(!!opts.follow);
+    if (!opts.deferShow) showView(playerView);
+    layoutSheetBlocks(true);
+  }
 
+  function openPlayer(id) {
+    const song = songs.find((s) => s.id === id);
+    if (!song) return;
+    if (jamIsFollow() || followRev) leaveFollow();
+    const hosting = jamIsHost();
+    renderSong(song, { deferShow: true });
+    if (hosting) jamSession.publishSong(song);
     showView(playerView);
     layoutSheetBlocks(true);
+    if (hosting) jamFlushPlay(true);
     startPracticeClock(id);
+    refreshJamChrome();
 
     // Track that a song was actually opened — key signal of real usage
     if (window.Analytics) {
@@ -1256,9 +1315,9 @@
   }
 
   function startScroll() {
+    if (jamIsFollow() || followRev) return;
     scrolling = true;
-    scrollToggle.textContent = "❚❚";
-    scrollToggle.classList.add("active");
+    paintTransport(true);
 
     // Track autoscroll starts — shows people are playing along, not just browsing
     if (window.Analytics) {
@@ -1297,6 +1356,7 @@
       scrollRAF = requestAnimationFrame(tick);
     }
     scrollRAF = requestAnimationFrame(tick);
+    jamFlushPlay(true);
   }
 
   // ── Practice time ──
@@ -1368,12 +1428,18 @@
   }
 
   function stopScroll() {
+    const wasScrolling = scrolling;
     scrolling = false;
-    scrollToggle.textContent = "▶";
-    scrollToggle.classList.remove("active");
+    paintTransport(false);
     if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
     // Scrolling stopped before the threshold — cancel the pending "played" mark
     if (playedTimer) { clearTimeout(playedTimer); playedTimer = null; }
+    if (wasScrolling) jamFlushPlay(true);
+  }
+
+  function paintTransport(playing) {
+    scrollToggle.textContent = playing ? "❚❚" : "▶";
+    scrollToggle.classList.toggle("active", !!playing);
   }
 
   function updateSpeedLabel() {
@@ -2307,6 +2373,455 @@
     updateHint();
   })();
 
+  // ── Jam ──
+  // The host publishes the open chart, then where they are in it. Followers
+  // render that chart (it may not be in their library) and scroll to the same
+  // fraction of the page, which survives phones being different widths.
+  function jamIsHost() {
+    return !!(jamSession && jamSession.role === "host");
+  }
+  function jamIsFollow() {
+    return !!(jamSession && jamSession.role === "follow");
+  }
+
+  function syncJamDataset() {
+    document.documentElement.dataset.jamRole = jamIsHost() ? "host" : (jamIsFollow() || followRev ? "follow" : "");
+    document.documentElement.dataset.jamCode = jamCode || "";
+    document.documentElement.dataset.jamStatus = jamLinkStatus || "";
+  }
+
+  function followerLabel(n) {
+    if (!n) return "No one else yet";
+    if (n === 1) return "1 person following";
+    return n + " people following";
+  }
+
+  function hostStatusLine() {
+    if (jamLinkStatus === "reconnecting") return "Reconnecting…";
+    if (jamLinkStatus !== "live") return "Connecting…";
+    return followerLabel(jamPeerCount);
+  }
+
+  function refreshJamChrome() {
+    const hosting = jamIsHost();
+    jamBtn.textContent = hosting ? jamCode : "Jam";
+    jamBtn.classList.toggle("is-live", hosting);
+    jamBtn.setAttribute("aria-label", hosting ? "Share jam " + jamCode : "Start a jam");
+    jamHostBar.hidden = !hosting;
+    if (hosting) jamHostLabel.textContent = "Jam " + jamCode + " · " + hostStatusLine();
+    if (hosting && jamSheetMode === "host" && !jamSheet.hidden) {
+      jamCodeEl.textContent = jamCode;
+      jamSheetStatus.textContent = hostStatusLine();
+    }
+    syncJamDataset();
+  }
+
+  function setFollowChrome(on) {
+    jamBanner.hidden = !on;
+    editCurrentBtn.hidden = on;
+    jamBtn.hidden = on;
+    scrollControls.classList.toggle("is-locked", on);
+    songContent.classList.toggle("jam-follow", on);
+    scrollToggle.disabled = on;
+    scrollSlower.disabled = on;
+    scrollFaster.disabled = on;
+    const hint = on ? "The person hosting the jam controls playback" : "";
+    scrollToggle.title = hint;
+    scrollSlower.title = hint;
+    scrollFaster.title = hint;
+    if (!on) {
+      jamBanner.classList.remove("is-ended");
+      paintTransport(scrolling);
+    }
+  }
+
+  function jamShareUrl() {
+    const url = new URL(location.href);
+    url.searchParams.set("jam", jamCode);
+    url.hash = "";
+    return url.toString();
+  }
+
+  function setJamQuery(code) {
+    const url = new URL(location.href);
+    if (code) url.searchParams.set("jam", code);
+    else url.searchParams.delete("jam");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+
+  function showJoinError(msg) {
+    jamJoinError.hidden = !msg;
+    jamJoinError.textContent = msg || "";
+  }
+
+  function closeJamSheet() {
+    jamSheet.hidden = true;
+  }
+
+  function openHostSheet() {
+    jamSheetMode = "host";
+    jamSheet.hidden = false;
+    jamSheetTitle.textContent = "Jam";
+    jamSheetLead.textContent = "Anyone with this code follows the song you're playing — the chart, the scroll, and the speed.";
+    jamCodeBlock.hidden = false;
+    jamJoinBlock.hidden = true;
+    jamCodeEl.textContent = jamCode;
+    showJoinError("");
+    refreshJamChrome();
+  }
+
+  function openJoinSheet(prefill) {
+    jamSheetMode = "join";
+    jamSheet.hidden = false;
+    jamSheetTitle.textContent = "Join a jam";
+    jamSheetLead.textContent = "Enter the code from the person who's playing.";
+    jamCodeBlock.hidden = true;
+    jamJoinBlock.hidden = false;
+    showJoinError("");
+    jamSheetStatus.textContent = "";
+    if (typeof prefill === "string") jamCodeInput.value = prefill;
+    setTimeout(() => jamCodeInput.focus(), 50);
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+      ta.remove();
+      return ok;
+    }
+  }
+
+  async function copyJamLink() {
+    const ok = await copyText(jamShareUrl());
+    if (!ok) return;
+    const prev = jamCopyBtn.textContent;
+    jamCopyBtn.textContent = "Copied";
+    setTimeout(() => {
+      if (jamCopyBtn.textContent === "Copied") jamCopyBtn.textContent = prev;
+    }, 1500);
+  }
+
+  async function shareJam() {
+    const url = jamShareUrl();
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Join my jam",
+          text: "Follow along on GuitarScroll — jam " + jamCode,
+          url: url,
+        });
+        return;
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    await copyJamLink();
+  }
+
+  function jamFlushPlay(force) {
+    if (!jamIsHost()) return;
+    const seek = jamHostSeek;
+    const state = {
+      playing: scrolling,
+      seek: seek,
+      speed: speed,
+      progress: Jam.progressOf(songContent.scrollTop, songContent.scrollHeight, songContent.clientHeight),
+      ts: Date.now(),
+    };
+    const key = (state.playing ? "1" : "0") + "|" + state.speed + "|" + state.progress.toFixed(4);
+    const now = Date.now();
+    if (!force && !seek && key === lastSentPlayKey && now - lastSentPlayAt < 2000) return;
+    jamHostSeek = false;
+    lastSentPlayKey = key;
+    lastSentPlayAt = now;
+    jamSession.publishPlay(state);
+  }
+
+  function startJamPump() {
+    clearInterval(playPump);
+    playPump = setInterval(() => jamFlushPlay(false), 250);
+  }
+  function stopJamPump() {
+    clearInterval(playPump);
+    playPump = null;
+  }
+
+  function endHostJam() {
+    const session = jamSession;
+    if (!session || session.role !== "host") return;
+    jamSession = null;
+    jamCode = "";
+    jamLinkStatus = "idle";
+    jamPeerCount = 0;
+    lastSentPlayKey = "";
+    stopJamPump();
+    try { session.end(); } catch (e) { /* socket already gone */ }
+    closeJamSheet();
+    refreshJamChrome();
+  }
+
+  function dropFollowQuiet() {
+    clearTimeout(jamWaitTimer);
+    if (followRAF) { cancelAnimationFrame(followRAF); followRAF = 0; }
+    const session = jamSession;
+    if (session && session.role === "follow") {
+      jamSession = null;
+      try { session.close(); } catch (e) { /* already closed */ }
+    }
+  }
+
+  function leaveFollow() {
+    jamJoinGen++;
+    dropFollowQuiet();
+    followRev = "";
+    followCursor = null;
+    pendingPlay = null;
+    followEnded = false;
+    jamTrackedJoin = false;
+    jamCode = "";
+    jamLinkStatus = "idle";
+    setFollowChrome(false);
+    setJamQuery("");
+    closeJamSheet();
+    if (playerView.classList.contains("active")) showView(libraryView);
+    refreshJamChrome();
+  }
+
+  function markHostSeek() {
+    if (jamIsHost()) jamHostSeek = true;
+  }
+
+  function applyFollowScroll(snap) {
+    if (!followCursor) return;
+    const progress = Jam.targetProgress(followCursor, Date.now());
+    const max = songContent.scrollHeight - songContent.clientHeight;
+    if (!(max > 0)) return;
+    const target = progress * max;
+    if (snap || followCursor.seek) {
+      songContent.scrollTop = target;
+      followCursor.seek = false;
+      return;
+    }
+    const diff = target - songContent.scrollTop;
+    if (Math.abs(diff) > max * 0.12) songContent.scrollTop = target;
+    else songContent.scrollTop += diff * 0.4;
+  }
+
+  function ensureFollowLoop() {
+    if (followRAF || followEnded) return;
+    const loop = () => {
+      if (followEnded || !followCursor || !followCursor.playing) {
+        followRAF = 0;
+        return;
+      }
+      applyFollowScroll(false);
+      if (Date.now() - followCursor.receivedAt > 12000) {
+        jamBannerText.textContent = "Waiting for the host…";
+      }
+      followRAF = requestAnimationFrame(loop);
+    };
+    followRAF = requestAnimationFrame(loop);
+  }
+
+  function showFollowSong(song) {
+    stopPracticeClock();
+    renderSong(song, { follow: true });
+    jamBanner.classList.remove("is-ended");
+    jamBannerText.textContent = "Following " + jamCode;
+    followEnded = false;
+  }
+
+  function onJamSong(msg) {
+    if (!msg || !msg.song || !msg.rev) return;
+    clearTimeout(jamWaitTimer);
+    showJoinError("");
+    if (!jamTrackedJoin) {
+      jamTrackedJoin = true;
+      if (window.Analytics) window.Analytics.track("jam-join", { song_title: msg.song.title || "" });
+    }
+    if (msg.rev !== followRev) {
+      followRev = msg.rev;
+      followCursor = null;
+      showFollowSong(msg.song);
+    }
+    const queued = pendingPlay;
+    pendingPlay = null;
+    if (queued && queued.rev === followRev) onJamPlay(queued);
+    closeJamSheet();
+    syncJamDataset();
+  }
+
+  function onJamPlay(msg) {
+    if (followEnded || !msg) return;
+    if (!followRev || msg.rev !== followRev) {
+      pendingPlay = msg;
+      return;
+    }
+    followCursor = Jam.cursorFromSample(followCursor, {
+      rev: msg.rev,
+      playing: !!msg.playing,
+      seek: !!msg.seek,
+      speed: msg.speed,
+      progress: msg.progress,
+      ts: msg.ts,
+    }, Date.now());
+    if (typeof msg.speed === "number" && isFinite(msg.speed)) applySpeed(msg.speed);
+    paintTransport(!!msg.playing);
+    applyFollowScroll(!!followCursor.seek || !msg.playing);
+    if (msg.playing) ensureFollowLoop();
+    else if (followRAF) { cancelAnimationFrame(followRAF); followRAF = 0; }
+    if (!followEnded && jamLinkStatus !== "reconnecting") {
+      jamBannerText.textContent = "Following " + jamCode;
+    }
+  }
+
+  function onJamEnded(session) {
+    followEnded = true;
+    if (followRAF) { cancelAnimationFrame(followRAF); followRAF = 0; }
+    paintTransport(false);
+    clearTimeout(jamWaitTimer);
+    if (jamSession === session) jamSession = null;
+    if (followRev) {
+      setFollowChrome(true);
+      jamBanner.classList.add("is-ended");
+      jamBannerText.textContent = "This jam has ended";
+      closeJamSheet();
+    } else {
+      openJoinSheet(jamCode);
+      jamSheetStatus.textContent = "This jam has ended.";
+    }
+    syncJamDataset();
+  }
+
+  function makeJamSession() {
+    const session = Jam.createSession({
+      onStatus(status) {
+        if (jamSession !== session) return;
+        jamLinkStatus = status;
+        if (session.role === "host") refreshJamChrome();
+        else if (!followRev && !followEnded) {
+          jamSheetStatus.textContent = status === "reconnecting"
+            ? "Reconnecting…"
+            : "Looking for jam " + jamCode + "…";
+        } else if (!followEnded && followRev) {
+          jamBannerText.textContent = status === "reconnecting"
+            ? "Reconnecting…"
+            : "Following " + jamCode;
+        }
+        syncJamDataset();
+      },
+      onPeers(n) {
+        if (jamSession !== session) return;
+        jamPeerCount = n;
+        if (session.role === "host") refreshJamChrome();
+      },
+      onSong(msg) { if (jamSession === session) onJamSong(msg); },
+      onPlay(msg) { if (jamSession === session) onJamPlay(msg); },
+      onEnd() {
+        if (jamSession !== session && !followRev) return;
+        onJamEnded(session);
+      },
+    });
+    return session;
+  }
+
+  function armJamWait() {
+    clearTimeout(jamWaitTimer);
+    jamWaitTimer = setTimeout(() => {
+      if (followRev || followEnded || !jamIsFollow()) return;
+      openJoinSheet(jamCode);
+      jamSheetStatus.textContent = "No one's playing on jam " + jamCode + " right now.";
+    }, 10000);
+  }
+
+  async function startHostJam() {
+    if (jamIsFollow() || followRev) return;
+    if (jamIsHost()) { openHostSheet(); return; }
+    const song = songs.find((s) => s.id === currentSongId);
+    if (!song || jamStarting) {
+      if (jamStarting) openHostSheet();
+      return;
+    }
+    jamStarting = true;
+    const code = Jam.newCode();
+    jamCode = code;
+    jamPeerCount = 0;
+    jamLinkStatus = "connecting";
+    const session = makeJamSession();
+    jamSession = session;
+    openHostSheet();
+    refreshJamChrome();
+    try {
+      await session.host(code);
+      if (jamSession !== session) return;
+      const current = songs.find((s) => s.id === currentSongId) || song;
+      session.publishSong(current);
+      jamFlushPlay(true);
+      startJamPump();
+      if (window.Analytics) {
+        window.Analytics.track("jam-start", { song_title: current.title || "" });
+      }
+      refreshJamChrome();
+    } catch (e) {
+      if (jamSession !== session) return;
+      jamSheetStatus.textContent = "Couldn't connect. Check your connection and try again.";
+    } finally {
+      jamStarting = false;
+    }
+  }
+
+  async function joinJam(raw) {
+    const code = Jam.normalizeCode(raw);
+    if (!code) {
+      openJoinSheet(typeof raw === "string" ? String(raw).trim().slice(0, 120) : "");
+      showJoinError("Enter the 5-character code from the person who's playing.");
+      return;
+    }
+    if (jamIsHost()) {
+      if (!confirm("End your jam and join this one?")) return;
+      endHostJam();
+    }
+    if (jamIsFollow() && jamCode === code) {
+      if (followRev) closeJamSheet();
+      return;
+    }
+    dropFollowQuiet();
+    followRev = "";
+    followCursor = null;
+    pendingPlay = null;
+    followEnded = false;
+    jamTrackedJoin = false;
+    jamCode = code;
+    jamLinkStatus = "connecting";
+    setJamQuery(code);
+    openJoinSheet(code);
+    jamSheetLead.textContent = "You'll see their chart as soon as they're playing.";
+    jamSheetStatus.textContent = "Looking for jam " + code + "…";
+    const session = makeJamSession();
+    jamSession = session;
+    const gen = ++jamJoinGen;
+    armJamWait();
+    syncJamDataset();
+    try {
+      await session.follow(code);
+      if (gen !== jamJoinGen || jamSession !== session) return;
+    } catch (e) {
+      if (gen !== jamJoinGen || jamSession !== session) return;
+      jamSheetStatus.textContent = "Couldn't connect. Check your connection and try again.";
+    }
+  }
+
   // ── Event Wiring ──
   addSongBtn.addEventListener("click", () => openEditor(null));
   calendarBtn.addEventListener("click", openPracticeCalendar);
@@ -2319,8 +2834,18 @@
       handleUgImport();
     }
   });
-  playerBackBtn.addEventListener("click", () => { showView(libraryView); stopScroll(); });
-  editCurrentBtn.addEventListener("click", () => openEditor(currentSongId));
+  playerBackBtn.addEventListener("click", () => {
+    if (jamIsFollow() || followRev) {
+      leaveFollow();
+      return;
+    }
+    showView(libraryView);
+    stopScroll();
+  });
+  editCurrentBtn.addEventListener("click", () => {
+    if (jamIsFollow() || followRev) return;
+    openEditor(currentSongId);
+  });
   statsBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
 
   // Practice time breakdown
@@ -2387,15 +2912,50 @@
     }
   });
   window.addEventListener("pagehide", () => {
+    if (jamIsHost()) endHostJam();
     if (!practiceSongId) return;
     // visibilitychange already banked the final foreground slice when present.
     if (!document.hidden) creditPracticeTime();
     saveSongs();
   });
 
-  scrollToggle.addEventListener("click", () => { scrolling ? stopScroll() : startScroll(); });
-  scrollSlower.addEventListener("click", () => { applySpeed(speed - 1); });
-  scrollFaster.addEventListener("click", () => { applySpeed(speed + 1); });
+  scrollToggle.addEventListener("click", () => {
+    if (jamIsFollow() || followRev) return;
+    scrolling ? stopScroll() : startScroll();
+  });
+  scrollSlower.addEventListener("click", () => {
+    if (jamIsFollow() || followRev) return;
+    applySpeed(speed - 1);
+    jamFlushPlay(true);
+  });
+  scrollFaster.addEventListener("click", () => {
+    if (jamIsFollow() || followRev) return;
+    applySpeed(speed + 1);
+    jamFlushPlay(true);
+  });
+
+  jamBtn.addEventListener("click", () => startHostJam());
+  jamHostOpen.addEventListener("click", () => { if (jamIsHost()) openHostSheet(); });
+  jamHostEnd.addEventListener("click", () => endHostJam());
+  jamEndBtn.addEventListener("click", () => endHostJam());
+  jamLeaveBtn.addEventListener("click", () => leaveFollow());
+  jamCopyBtn.addEventListener("click", () => copyJamLink());
+  jamShareBtn.addEventListener("click", () => shareJam());
+  jamSheet.addEventListener("click", () => closeJamSheet());
+  jamSheet.querySelector(".jam-card").addEventListener("click", (e) => e.stopPropagation());
+  jamJoinBlock.addEventListener("submit", (e) => {
+    e.preventDefault();
+    joinJam(jamCodeInput.value);
+  });
+  joinJamBtn.addEventListener("click", () => {
+    menuDropdown.classList.add("hidden");
+    openJoinSheet("");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !jamSheet.hidden) closeJamSheet();
+  });
+  songContent.addEventListener("pointerdown", markHostSeek);
+  songContent.addEventListener("wheel", markHostSeek, { passive: true });
 
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value.trim();
@@ -2555,16 +3115,32 @@
   updateSpeedLabel();
 
   if (window.ResizeObserver) {
-    new ResizeObserver(() => layoutSheetBlocks(false)).observe(songContent);
+    new ResizeObserver(() => {
+      layoutSheetBlocks(false);
+      if (followRev) applyFollowScroll(true);
+    }).observe(songContent);
   } else {
-    window.addEventListener("resize", () => layoutSheetBlocks(false));
+    window.addEventListener("resize", () => {
+      layoutSheetBlocks(false);
+      if (followRev) applyFollowScroll(true);
+    });
   }
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => layoutSheetBlocks(true)).catch(() => {});
+    document.fonts.ready.then(() => {
+      layoutSheetBlocks(true);
+      if (followRev) applyFollowScroll(true);
+    }).catch(() => {});
   }
 
+  if (!navigator.share) jamShareBtn.hidden = true;
+
+  const jamLink = new URLSearchParams(location.search).get("jam");
+  if (jamLink) joinJam(jamLink);
+
   // ── Service Worker ──
-  if ("serviceWorker" in navigator) {
+  // ?nosw=1 skips registration so a reload from a fresh worker can't cut a
+  // jam off mid-test. Real visits always register.
+  if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("nosw")) {
     navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {
       navigator.serviceWorker.register("sw.js").catch(() => {});
     });

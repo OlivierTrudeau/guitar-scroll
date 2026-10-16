@@ -1,9 +1,10 @@
-const CACHE_NAME = "guitarscroll-v29";
+const CACHE_NAME = "guitarscroll-v30";
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./jam.js",
   "./pitch.js",
   "./analytics.js",
   "./manifest.json",
@@ -44,7 +45,9 @@ self.addEventListener("activate", (e) => {
 });
 
 function fromCache(request) {
-  return caches.open(CACHE_NAME).then((cache) => cache.match(request));
+  // Jam links are ?jam=CODE. The cached shell has no query, and the page still
+  // has to load for the socket to connect.
+  return caches.open(CACHE_NAME).then((cache) => cache.match(request, { ignoreSearch: true }));
 }
 
 self.addEventListener("fetch", (e) => {
