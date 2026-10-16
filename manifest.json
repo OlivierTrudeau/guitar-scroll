@@ -1,7 +1,7 @@
 {
   "name": "GuitarScroll",
   "short_name": "GuitarScroll",
-  "description": "Autoscrolling chord & lyric viewer for guitar players",
+  "description": "Autoscrolling chords and lyrics. Friends can join your jam and follow along.",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#121218",

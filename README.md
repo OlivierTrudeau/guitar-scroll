@@ -38,6 +38,12 @@ This field replaces the old per-song tuning. Tunings written as a speed (`5x`)
 carry over automatically the first time the app loads; real tunings are dropped,
 since nothing displayed them. The tuner's own tuning picker is unaffected.
 
+## Jam
+
+Open a song and tap **Jam**. You get a short code and a link. Anyone who opens the link — or chooses **⋯ → Join a jam** and types the code — sees the chart you're on and follows your scroll, play, pause, and speed. Go back and open a different song, and they switch with you. The jam keeps running from the library bar until you tap **End**.
+
+Following needs a connection (the tuner still works offline). GuitarScroll is a static site, so the jam is relayed through a public broker rather than a server of ours. The code is the only thing keeping other people out — share it with the room, not the whole internet.
+
 ## Run locally
 
 ```bash
@@ -71,7 +77,7 @@ git add . && git commit -m "message" && git push
 Because the app is hosted on GitHub Pages, every `git push` updates the live
 site for everyone automatically. The one catch: the app is a PWA and its service
 worker (`sw.js`) caches files, so returning visitors keep the old version until
-the cache changes. Whenever you change `index.html`, `app.js`, `pitch.js`,
+the cache changes. Whenever you change `index.html`, `app.js`, `jam.js`, `pitch.js`,
 `style.css`, or `analytics.js`, bump `CACHE_NAME` in `sw.js` (e.g.
 `guitarscroll-v12` → `guitarscroll-v13`) so everyone reliably picks up the new
 files.
@@ -139,6 +145,8 @@ only send events, not read your data.
   - `song-practiced` — a song was practiced (scrolled past the ~5s threshold)
   - `song-add` — someone added their own song (includes library size)
   - `ug-import` — someone imported a song from an Ultimate Guitar link
+  - `jam-start` — someone started a jam (includes the song title)
+  - `jam-join` — someone joined a jam and received the chart
 - **Retention** (left sidebar → Retention): the real "user stories" view — e.g.
   "of the people who used it this week, how many came back next week." This is
   what tells daily users apart from people who drifted away after a month.
