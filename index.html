@@ -227,7 +227,7 @@
     <div id="tuner-view" class="view">
       <header class="top-bar">
         <button id="tuner-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
-        <h1>Tuner <span class="tuner-version">v3</span></h1>
+        <h1>Tuner</h1>
         <select id="tuner-tuning" class="tuner-tuning" aria-label="Tuning"></select>
       </header>
       <div class="tuner-body">
@@ -239,13 +239,15 @@
             <path class="dial-zone" d="M 141.20 36.18 A 150 150 0 0 1 178.80 36.18" />
             <g id="dial-ticks" class="dial-ticks"></g>
           </svg>
+          <span class="dial-end dial-flat" aria-hidden="true">♭</span>
+          <span class="dial-end dial-sharp" aria-hidden="true">♯</span>
           <div id="tuner-needle" class="dial-needle"><span class="dial-needle-tip"></span></div>
           <div class="dial-readout">
             <div id="tuner-note" class="tuner-note">—</div>
             <div id="tuner-cents" class="tuner-cents"></div>
           </div>
         </div>
-        <div id="tuner-freq" class="tuner-freq">Tap start &amp; play a string</div>
+        <div id="tuner-freq" class="tuner-freq">Tap Start to listen</div>
         <div id="tuner-status" class="tuner-status">—</div>
 
         <!-- Reference strings for the chosen tuning; tap one to lock onto it -->

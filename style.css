@@ -860,7 +860,7 @@ html, body {
   height: 82.56%;
   transform: rotate(0deg);
   transform-origin: 50% 100%;
-  transition: transform .09s ease-out;
+  will-change: transform;
 }
 .dial-needle-tip {
   position: absolute;
@@ -874,6 +874,16 @@ html, body {
   transition: border-bottom-color .2s;
 }
 .tuner-dial.in-tune .dial-arc { stroke: rgba(103, 197, 138, 0.28); }
+.tuner-dial.in-tune .dial-zone { opacity: 1; filter: drop-shadow(0 0 6px rgba(103, 197, 138, .75)); }
+.dial-zone { transition: opacity .2s; }
+.dial-end {
+  position: absolute; bottom: -2px; font-family: var(--serif); font-size: 22px; line-height: 1;
+  color: var(--text2); opacity: .8; pointer-events: none;
+}
+.dial-flat { left: 4px; }
+.dial-sharp { right: 4px; }
+.tuner-oct { font-size: .38em; vertical-align: super; margin-left: 2px; font-weight: 500; opacity: .75; }
+.dial-needle-tip { filter: drop-shadow(0 1px 3px rgba(0,0,0,.45)); }
 .tuner-dial.in-tune .dial-needle-tip { border-bottom-color: var(--ok); }
 /* Dimmed while the last note fades out and no fresh pitch is coming in */
 .tuner-dial.stale { opacity: .45; }
