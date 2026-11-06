@@ -1,89 +1,161 @@
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* Rosewood, bone and brass: the colours of a guitar's fretboard, nut and frets. */
 :root {
-  --bg: #121218;
-  --surface: #1a1a24;
-  --surface2: #24243a;
-  --accent: #7c6aef;
-  --accent-dim: #5a4abf;
-  --text: #e8e8f0;
-  --text2: #9999b0;
-  --chord: #f0c050;
-  --section: #7c6aef;
-  --border: #2a2a40;
+  --bg: #15110e;          /* rosewood */
+  --surface: #1e1915;
+  --surface2: #29221c;
+  --border: #3a3027;      /* hairlines */
+  --text: #f0e8dc;        /* bone */
+  --text2: #a89c8e;
+  --accent: #d8a446;      /* brass */
+  --accent-dim: #a9812f;
+  --on-accent: #1a1308;
+  --chord: #e2b04e;
+  --section: var(--text);
+  --ok: #67c58a;
+  --danger: #e0645a;
   --radius: 12px;
+  --tabbar-h: 58px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --font: 'Hanken Grotesk', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --serif: 'Source Serif 4', 'Iowan Old Style', 'Charter', Georgia, serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, 'DejaVu Sans Mono', monospace;
 }
 
 html, body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font);
   height: 100%;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
 #app { height: 100%; position: relative; }
 
 .view {
   position: absolute;
-  inset: 0;
+  top: 0; left: 0; right: 0;
+  bottom: var(--inset-b, 0px);
   display: flex;
   flex-direction: column;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .2s ease;
+  transition: opacity .18s ease;
 }
 .view.active { opacity: 1; pointer-events: auto; }
+
+/* ── Tab bar (Songs / Practice / Tuner) ── */
+.tabbar {
+  display: none;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: calc(var(--tabbar-h) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  background: rgba(21, 17, 14, .94);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+  z-index: 50;
+}
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font: 600 11px/1 var(--font);
+  cursor: pointer;
+}
+.tab:active { opacity: .6; }
+
+#app[data-view="library-view"],
+#app[data-view="stats-view"],
+#app[data-view="practice-time-view"],
+#app[data-view="tuner-view"] { --inset-b: calc(var(--tabbar-h) + var(--safe-bottom)); }
+
+#app[data-view="library-view"] ~ .tabbar,
+#app[data-view="stats-view"] ~ .tabbar,
+#app[data-view="practice-time-view"] ~ .tabbar,
+#app[data-view="tuner-view"] ~ .tabbar { display: flex; }
+
+#app[data-view="library-view"] ~ .tabbar #tab-songs,
+#app[data-view="stats-view"] ~ .tabbar #calendar-btn,
+#app[data-view="practice-time-view"] ~ .tabbar #calendar-btn,
+#app[data-view="tuner-view"] ~ .tabbar #tuner-btn { color: var(--accent); }
+
+/* The tab bar already says where you are, so these two screens need no back arrow */
+#stats-back-btn, #tuner-back-btn { display: none; }
 
 /* ── Top Bar ── */
 .top-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  padding-top: max(12px, env(safe-area-inset-top));
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 10px 12px 6px 20px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  background: var(--bg);
   flex-shrink: 0;
-  min-height: 56px;
+  min-height: 60px;
 }
 .top-bar h1 {
   flex: 1;
-  font-size: 18px;
-  font-weight: 700;
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
   background: none;
   border: none;
-  color: var(--accent);
-  font-size: 22px;
+  color: var(--text);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 8px;
+  border-radius: 12px;
   line-height: 1;
 }
-.icon-btn:active { opacity: .6; }
+.icon-btn:active { background: var(--surface2); }
+.icon-btn-solid {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 999px;
+  width: 40px;
+  margin-right: 2px;
+}
+.icon-btn-solid:active { background: var(--accent-dim); }
 
-/* Text label button in the top bar (e.g. "Tuner") — clearer than an ambiguous icon */
 .text-btn {
   background: none;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  font-family: inherit;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: 600 13px/1 var(--font);
   cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 8px;
-  line-height: 1;
+  padding: 9px 14px;
+  border-radius: 999px;
   white-space: nowrap;
 }
-.text-btn:active { opacity: .6; }
+.text-btn:active { background: var(--surface2); }
+.text-btn.solid {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.text-btn.solid:active { background: var(--accent-dim); }
 
 /* ── Menu Dropdown ── */
 .menu-dropdown {
@@ -92,11 +164,11 @@ html, body {
   right: 12px;
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
   overflow: hidden;
   z-index: 100;
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
-  min-width: 170px;
+  box-shadow: 0 14px 36px rgba(0,0,0,.55);
+  min-width: 190px;
 }
 .menu-dropdown.hidden { display: none; }
 .menu-item {
@@ -106,58 +178,65 @@ html, body {
   border: none;
   border-bottom: 1px solid var(--border);
   color: var(--text);
-  font-size: 15px;
-  font-family: inherit;
+  font: 500 15px var(--font);
   padding: 14px 18px;
   text-align: left;
   cursor: pointer;
-  transition: background .15s;
 }
 .menu-item:last-child { border-bottom: none; }
-.menu-item:active { background: var(--accent-dim); }
+.menu-item:active { background: var(--border); }
 
 /* ── Song List ── */
 .song-list {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 8px 0;
+  padding: 0 0 16px;
   touch-action: pan-y;
   overscroll-behavior: contain;
 }
 .song-item {
   display: flex;
-  align-items: center;
-  padding: 14px 20px;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 20px;
+  padding: 15px 0 14px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
-  transition: background .15s;
 }
-.song-item:active { background: var(--surface2); }
+.song-item:last-child { border-bottom: none; }
+.song-item:active .song-item-title { color: var(--accent); }
 .song-item-info { flex: 1; min-width: 0; }
 .song-item-title {
-  font-size: 16px;
+  font-family: var(--serif);
+  font-size: 19px;
   font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.005em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .song-item-artist {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--text2);
-  margin-top: 2px;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .song-item-delete {
   background: none;
   border: none;
-  color: #e05050;
-  font-size: 18px;
-  padding: 6px 10px;
+  color: var(--text2);
+  padding: 6px;
+  margin: -2px -6px 0 0;
   cursor: pointer;
-  border-radius: 8px;
-  opacity: 0.6;
+  border-radius: 10px;
+  opacity: .45;
+  display: inline-flex;
 }
-.song-item-delete:active { opacity: 1; }
+.song-item-delete:active { opacity: 1; color: var(--danger); }
 
 .empty-state {
   flex: 1;
@@ -165,88 +244,75 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--text2);
-  font-size: 18px;
+  text-align: center;
+  padding: 0 40px 60px;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 600;
 }
-.empty-state .sub { font-size: 14px; margin-top: 6px; opacity: .6; }
+.empty-state .sub {
+  font: 400 14px/1.5 var(--font);
+  color: var(--text2);
+  margin-top: 8px;
+  max-width: 270px;
+}
 
 /* ── Filter Bar ── */
 .filter-bar {
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  padding: 6px 20px 12px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   flex-shrink: 0;
 }
 .filter-bar input {
-  background: var(--surface2);
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a89c8e' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='M16 16l4 4'/%3E%3C/svg%3E") no-repeat 12px center / 18px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
   color: var(--text);
-  font-size: 15px;
-  padding: 10px 14px;
+  font: 400 15px var(--font);
+  padding: 11px 14px 11px 40px;
   outline: none;
-  font-family: inherit;
-  transition: border-color .2s;
+  transition: border-color .15s;
   width: 100%;
   flex: 1;
   min-width: 0;
 }
 .filter-bar input:focus { border-color: var(--accent); }
 .filter-bar input::placeholder { color: var(--text2); }
-.search-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sort-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
+.search-row { display: flex; align-items: center; gap: 8px; }
+.sort-wrap { position: relative; flex-shrink: 0; }
 .sort-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  min-width: 44px;
-  height: 42px;
+  min-width: 46px;
+  height: 44px;
   padding: 0 10px;
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
   color: var(--text2);
   cursor: pointer;
   font-family: inherit;
-  transition: border-color .15s, color .15s, background .15s;
 }
-.sort-btn:active { opacity: .75; }
+.sort-btn:active { background: var(--surface2); }
 .sort-btn.is-open,
-.sort-btn.is-active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.sort-btn-icon {
-  display: block;
-  flex-shrink: 0;
-}
-.sort-btn-caret {
-  font-size: 12px;
-  line-height: 1;
-  opacity: 0.85;
-}
+.sort-btn.is-active { border-color: var(--accent); color: var(--accent); }
+.sort-btn-icon { display: block; flex-shrink: 0; }
+.sort-btn-caret { display: none; }
 .sort-dropdown {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 200px;
+  min-width: 210px;
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
   overflow: hidden;
   z-index: 100;
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  box-shadow: 0 14px 36px rgba(0,0,0,.55);
 }
 .sort-dropdown.hidden { display: none; }
 .sort-option {
@@ -256,211 +322,150 @@ html, body {
   border: none;
   border-bottom: 1px solid var(--border);
   color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
+  font: 500 14px var(--font);
   text-align: left;
-  padding: 12px 14px;
+  padding: 13px 16px;
   cursor: pointer;
 }
 .sort-option:last-child { border-bottom: none; }
-.sort-option:active { background: var(--accent-dim); }
-.sort-option.active {
-  color: var(--accent);
-  font-weight: 700;
-}
+.sort-option:active { background: var(--border); }
+.sort-option.active { color: var(--accent); font-weight: 700; }
 .proficiency-filter {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  margin: 0 -20px;
+  padding: 0 20px;
 }
 .proficiency-filter::-webkit-scrollbar { display: none; }
 .filter-pill {
-  background: var(--surface2);
+  background: none;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: 999px;
   color: var(--text2);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 6px 14px;
+  font: 600 13px/1 var(--font);
+  padding: 8px 14px;
   cursor: pointer;
   white-space: nowrap;
-  transition: all .15s;
   flex-shrink: 0;
 }
-.filter-pill:active { opacity: .7; }
+.filter-pill:active { background: var(--surface2); }
 .filter-pill.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .song-count {
   color: var(--text2);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 10px 20px 0;
+  font-size: 13px;
+  padding: 2px 20px 8px;
   margin: 0;
   flex-shrink: 0;
 }
 .no-results {
   text-align: center;
   color: var(--text2);
-  padding: 40px 20px;
+  padding: 48px 20px;
   font-size: 15px;
 }
 
-/* ── Proficiency in song list ── */
-.song-item-prof { margin-top: 4px; }
-/* Row that holds last-played + practice-count badges side by side */
+/* ── Rating and history in the song list ── */
+.song-item-prof { flex-shrink: 0; padding-top: 4px; }
 .song-item-meta-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 4px 12px;
+  margin-top: 6px;
 }
-.song-item-meta-row .song-item-lastplayed { margin-top: 0; }
-.practice-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--accent);
-  background: rgba(124, 106, 239, 0.12);
-  border-radius: 6px;
-  padding: 1px 7px;
-}
-.song-item-lastplayed {
-  font-size: 11px;
-  color: var(--text2);
-  margin-top: 4px;
-}
-/* Rusty = played before but a long time ago; highlight so it stands out for practice */
-.song-item-lastplayed.rusty {
-  color: var(--chord);
-  font-weight: 600;
-}
-/* Never played — keep it subtle */
-.song-item-lastplayed.never {
-  color: var(--text2);
-  opacity: 0.7;
-  font-style: italic;
-}
-.prof-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.prof-badge .star { color: var(--border); font-size: 12px; }
-.prof-badge .star.filled { color: var(--chord); }
-.prof-badge .prof-text { color: var(--text2); margin-left: 3px; }
-.prof-badge.unrated { color: var(--text2); opacity: 0.5; font-size: 11px; }
+.practice-badge { font-size: 12px; color: var(--text2); }
+.song-item-lastplayed { font-size: 12px; color: var(--text2); }
+.song-item-lastplayed.rusty { color: var(--accent); font-weight: 600; }
+.song-item-lastplayed.never { display: none; }
+.prof-badge { display: inline-flex; align-items: center; gap: 1px; }
+.prof-badge .star { color: var(--border); font-size: 13px; line-height: 1; }
+.prof-badge .star.filled { color: var(--accent); }
+.prof-badge.unrated { display: none; }
 
 /* ── Proficiency stars (editor) ── */
 .proficiency-edit {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 4px 0;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 2px 0;
 }
-.proficiency-edit label {
-  font-size: 14px;
-  color: var(--text2);
-  white-space: nowrap;
-}
-.proficiency-stars {
-  display: flex;
-  gap: 4px;
-}
+.proficiency-edit label { font-size: 14px; color: var(--text2); width: 100%; }
+.proficiency-stars { display: flex; gap: 2px; margin-left: -2px; }
 .star-btn {
   background: none;
   border: none;
-  font-size: 26px;
+  font-size: 28px;
   color: var(--border);
   cursor: pointer;
-  padding: 2px;
+  padding: 2px 3px;
   line-height: 1;
-  transition: color .12s, transform .12s;
+  transition: transform .12s;
 }
-.star-btn:active { transform: scale(1.2); }
-.star-btn.active { color: var(--chord); }
-.proficiency-label {
-  font-size: 13px;
-  color: var(--text2);
-  font-weight: 500;
-}
+.star-btn:active { transform: scale(1.18); }
+.star-btn.active { color: var(--accent); }
+.proficiency-label { font-size: 14px; color: var(--text2); font-weight: 500; }
 
 /* ── Edit Form ── */
 .edit-form {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px;
+  padding: 8px 20px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 .edit-form input, .edit-form textarea {
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
   color: var(--text);
-  font-size: 15px;
-  padding: 12px 14px;
+  font: 400 16px var(--font);
+  padding: 13px 14px;
   outline: none;
-  font-family: inherit;
-  transition: border-color .2s;
+  transition: border-color .15s, box-shadow .15s;
 }
 .edit-form input:focus, .edit-form textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(216, 164, 70, .16);
 }
+.edit-form input::placeholder, .edit-form textarea::placeholder { color: #7d7266; }
 .edit-form textarea {
   flex: 1;
   min-height: 260px;
   resize: none;
-  font-family: 'SF Mono', 'Menlo', 'Courier New', monospace;
+  font-family: var(--mono);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   white-space: pre;
 }
 
-.ug-import-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.ug-import {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
-}
-.ug-import input {
-  flex: 1;
-  min-width: 0;
-}
+.ug-import-wrap { display: flex; flex-direction: column; gap: 8px; }
+.ug-import { display: flex; gap: 8px; align-items: stretch; }
+.ug-import input { flex: 1; min-width: 0; }
 .ug-import-btn {
   position: relative;
   flex-shrink: 0;
-  min-width: 88px;
+  min-width: 92px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border: none;
-  border-radius: var(--radius);
+  border-radius: 12px;
   padding: 0 16px;
-  font-size: 14px;
-  font-weight: 600;
-  font-family: inherit;
+  font: 700 14px var(--font);
   cursor: pointer;
-  transition: opacity .15s;
 }
-.ug-import-btn:disabled {
-  opacity: 0.7;
-  cursor: wait;
-}
-.ug-import-btn.is-loading .ug-import-btn-label {
-  visibility: hidden;
-}
+.ug-import-btn:active { background: var(--accent-dim); }
+.ug-import-btn:disabled { opacity: .7; cursor: wait; }
+.ug-import-btn.is-loading .ug-import-btn-label { visibility: hidden; }
 .ug-import-btn-spinner {
   display: none;
   position: absolute;
@@ -468,22 +473,16 @@ html, body {
   margin: auto;
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  border-top-color: #fff;
+  border: 2px solid rgba(26, 19, 8, .3);
+  border-top-color: var(--on-accent);
   border-radius: 50%;
   animation: ug-spin 0.7s linear infinite;
 }
-.ug-import-btn.is-loading .ug-import-btn-spinner {
-  display: block;
-}
-@keyframes ug-spin {
-  to { transform: rotate(360deg); }
-}
-.ug-import-progress[hidden] {
-  display: none !important;
-}
+.ug-import-btn.is-loading .ug-import-btn-spinner { display: block; }
+@keyframes ug-spin { to { transform: rotate(360deg); } }
+.ug-import-progress[hidden] { display: none !important; }
 .ug-import-progress-track {
-  height: 4px;
+  height: 3px;
   border-radius: 999px;
   background: var(--border);
   overflow: hidden;
@@ -499,74 +498,56 @@ html, body {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(320%); }
 }
-.ug-import-status {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text2);
-  line-height: 1.35;
-  min-height: 1.2em;
-}
-.ug-import-status.is-error {
-  color: #c45c5c;
-}
-.ug-import-status.is-ok {
-  color: #3d8f6e;
-}
-.ug-import-status.is-progress {
-  color: var(--text2);
-}
+.ug-import-status { margin: 0; font-size: 13px; color: var(--text2); line-height: 1.4; min-height: 1.2em; }
+.ug-import-status.is-error { color: var(--danger); }
+.ug-import-status.is-ok { color: var(--ok); }
+.ug-import-status.is-progress { color: var(--text2); }
 
 /* ── Player ── */
-.player-bar { gap: 8px; }
-.player-title-wrap {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+.player-bar {
+  gap: 4px;
+  padding-left: 6px;
+  border-bottom: 1px solid var(--border);
 }
-.player-title-wrap h1 { font-size: 16px; }
+.player-title-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.player-title-wrap h1 { font-size: 19px; line-height: 1.2; }
 .artist-sub {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.player-bar .text-btn { padding: 8px 13px; margin-right: 2px; }
 
 .song-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  padding: 12px 20px 4px;
   flex-shrink: 0;
 }
 .song-meta:empty { display: none; }
 .meta-tag {
-  background: var(--surface2);
-  border-radius: 6px;
-  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 11px;
   font-size: 12px;
-  color: var(--text2);
-  font-weight: 500;
+  color: var(--text);
+  font-weight: 600;
 }
-.meta-tag strong { color: var(--text); font-weight: 600; }
-/* Rusty last-played tag in the player — draws attention to a song gone stale */
-.meta-tag.rusty {
-  background: rgba(240, 192, 80, 0.15);
-  color: var(--chord);
-}
-.meta-tag.rusty strong { color: var(--chord); }
+.meta-tag strong { color: var(--text2); font-weight: 500; margin-right: 3px; }
+.meta-tag.rusty { border-color: var(--accent-dim); color: var(--accent); }
+.meta-tag.rusty strong { color: var(--accent); opacity: .8; }
 
 .song-content {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px 16px 120px;
-  font-family: 'SF Mono', 'Menlo', 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.6;
+  padding: 12px 20px 160px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: normal;
   overflow-wrap: break-word;
@@ -575,7 +556,7 @@ html, body {
   overscroll-behavior: contain;
 }
 
-.line-chord { color: var(--chord); font-weight: 700; }
+.line-chord { color: var(--chord); font-weight: 600; }
 
 /* A chord/lyric pair cut into rows that share a column index. pre (not flex)
    so a phone cannot break a word where a chord sits inside it. */
@@ -591,7 +572,7 @@ html, body {
   white-space: normal;
   word-break: normal;
   overflow-wrap: normal;
-  margin: 0.12em 0 0.28em;
+  margin: 0.12em 0 0.34em;
 }
 .sheet-row .line-chord,
 .sheet-row .line-lyric {
@@ -602,100 +583,101 @@ html, body {
   hyphens: none;
   -webkit-hyphens: none;
 }
-.sheet-row .line-chord { line-height: 1.2; }
-.sheet-row .line-lyric { line-height: 1.35; color: var(--text); }
+.sheet-row .line-chord { line-height: 1.25; }
+.sheet-row .line-lyric { line-height: 1.4; color: var(--text); }
 .line-section {
-  color: var(--section);
-  font-weight: 700;
-  margin-top: 16px;
   display: block;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--section);
+  margin: 26px 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  white-space: normal;
 }
 .line-lyric { color: var(--text); }
 .line-empty { display: block; height: 8px; }
 .strum-pattern {
   display: block;
-  color: var(--chord);
-  font-weight: 600;
-  background: var(--surface2);
-  border-radius: 8px;
-  padding: 8px 12px;
-  margin-bottom: 12px;
+  color: var(--text);
+  font-weight: 500;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
   font-size: 13px;
 }
 
-/* ── Scroll Controls ── */
+/* ── Scroll Controls: a floating transport ── */
 .scroll-controls {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  left: 50%;
+  bottom: max(18px, calc(var(--safe-bottom) + 10px));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 12px 20px;
-  padding-bottom: max(12px, var(--safe-bottom));
-  background: linear-gradient(transparent, var(--bg) 20%);
-  pointer-events: none;
+  gap: 4px;
+  padding: 6px 18px 6px 6px;
+  background: rgba(30, 25, 21, .9);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
 }
-.scroll-controls > * { pointer-events: auto; }
 .ctrl-btn {
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   border: none;
-  background: var(--surface2);
+  background: none;
   color: var(--text);
-  font-size: 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background .15s;
 }
-.ctrl-btn:active { background: var(--accent-dim); }
+.ctrl-btn:active { background: var(--surface2); }
 .play-btn {
-  width: 56px;
-  height: 56px;
+  width: 54px;
+  height: 54px;
   background: var(--accent);
-  font-size: 22px;
+  color: var(--on-accent);
+  margin: 0 2px;
 }
-.play-btn.active { background: #e05050; }
+.play-btn:active { background: var(--accent-dim); }
 .speed-label {
-  color: var(--text2);
-  font-size: 14px;
-  font-weight: 600;
-  min-width: 40px;
-  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 46px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Tuner ── */
 .tuner-tuning {
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 7px 8px;
+  border-radius: 999px;
+  color: var(--text);
+  font: 600 13px var(--font);
+  padding: 9px 12px;
   max-width: 45%;
   cursor: pointer;
 }
 .tuner-version {
   display: inline-block;
-  vertical-align: 2px;
-  margin-left: 2px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: .04em;
+  vertical-align: 6px;
+  margin-left: 4px;
+  font: 600 11px/1 var(--font);
+  color: var(--text2);
+  letter-spacing: 0;
 }
 .tuner-body {
   flex: 1;
@@ -704,8 +686,8 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 16px 20px calc(24px + var(--safe-bottom));
+  gap: 16px;
+  padding: 20px 20px 24px;
 }
 
 /* ── Tuner dial ── */
@@ -721,13 +703,7 @@ html, body {
 @supports not (aspect-ratio: 1) {
   .tuner-dial { height: 0; padding-bottom: 53.75%; }
 }
-.dial-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
+.dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .dial-arc {
   fill: none;
   stroke: var(--surface2);
@@ -738,19 +714,15 @@ html, body {
 /* The ±5 cent window at the top of the dial you are aiming the pointer into */
 .dial-zone {
   fill: none;
-  stroke: #46d17a;
+  stroke: var(--ok);
   stroke-width: 13;
   stroke-linecap: butt;
-  opacity: .5;
+  opacity: .55;
 }
 /* Notches cut across the band, drawn in the page colour */
-.dial-tick {
-  stroke: var(--bg);
-  stroke-width: 2.5;
-}
+.dial-tick { stroke: var(--bg); stroke-width: 2.5; }
 .dial-tick.major { stroke-width: 5; }
 
-/* Pointer riding just inside the band, rotated about the dial centre */
 /* The dial centre sits just below the box, so the pointer pivots from there */
 .dial-needle {
   position: absolute;
@@ -770,11 +742,11 @@ html, body {
   height: 0;
   border-left: 8px solid transparent;
   border-right: 8px solid transparent;
-  border-bottom: 20px solid var(--chord);
+  border-bottom: 20px solid var(--accent);
   transition: border-bottom-color .2s;
 }
-.tuner-dial.in-tune .dial-arc { stroke: rgba(70, 209, 122, 0.28); }
-.tuner-dial.in-tune .dial-needle-tip { border-bottom-color: #46d17a; }
+.tuner-dial.in-tune .dial-arc { stroke: rgba(103, 197, 138, 0.28); }
+.tuner-dial.in-tune .dial-needle-tip { border-bottom-color: var(--ok); }
 /* Dimmed while the last note fades out and no fresh pitch is coming in */
 .tuner-dial.stale { opacity: .45; }
 
@@ -782,36 +754,36 @@ html, body {
   position: absolute;
   left: 0;
   right: 0;
-  top: 46.5%;
+  top: 40%;
   text-align: center;
   pointer-events: none;
 }
 .tuner-note {
-  font-size: 46px;
-  font-weight: 800;
+  font-family: var(--serif);
+  font-size: 60px;
+  font-weight: 600;
   line-height: 1;
   color: var(--text2);
   transition: color .15s;
 }
-/* In-tune note glows green; off-pitch note uses the accent gold */
-.tuner-note.in-tune { color: #46d17a; }
-.tuner-note.detecting { color: var(--chord); }
+.tuner-note.in-tune { color: var(--ok); }
+.tuner-note.detecting { color: var(--text); }
 .tuner-cents {
-  font-size: 19px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   line-height: 1;
-  margin-top: 8px;
-  min-height: 19px;
+  margin-top: 10px;
+  min-height: 18px;
   color: var(--text2);
   font-variant-numeric: tabular-nums;
 }
-.tuner-cents.flat, .tuner-cents.sharp { color: var(--chord); }
-.tuner-cents.in-tune { color: #46d17a; }
+.tuner-cents.flat, .tuner-cents.sharp { color: var(--accent); }
+.tuner-cents.in-tune { color: var(--ok); }
 .tuner-freq {
   font-size: 13px;
   color: var(--text2);
   font-variant-numeric: tabular-nums;
-  margin-top: -4px;
+  margin-top: 8px;
 }
 .tuner-status {
   text-align: center;
@@ -820,75 +792,58 @@ html, body {
   color: var(--text2);
   min-height: 20px;
 }
-.tuner-status.flat { color: #e0a050; }
-.tuner-status.sharp { color: #e0a050; }
-.tuner-status.in-tune { color: #46d17a; }
+.tuner-status.flat, .tuner-status.sharp { color: var(--accent); }
+.tuner-status.in-tune { color: var(--ok); }
 
-.tuner-strings {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
+.tuner-strings { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
 .tuner-string {
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 50%;
   color: var(--text);
-  font-size: 16px;
-  font-weight: 700;
+  font: 700 16px var(--font);
   width: 48px;
   height: 48px;
   cursor: pointer;
-  transition: all .15s;
+  transition: background .15s, color .15s, border-color .15s;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.tuner-string sub { font-size: 10px; }
+.tuner-string sub { font-size: 10px; font-weight: 600; opacity: .8; }
 /* Closest reference string to the detected pitch is highlighted */
 .tuner-string.target {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 /* Locked in-tune strings stay green for the whole session (even when not the target) */
 .tuner-string.in-tune {
-  background: #46d17a;
-  border-color: #46d17a;
-  color: #fff;
-  box-shadow: 0 0 0 2px rgba(70, 209, 122, 0.35);
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #0e2316;
+  box-shadow: 0 0 0 3px rgba(103, 197, 138, 0.28);
 }
-.tuner-string.target.in-tune {
-  background: #46d17a;
-  border-color: #46d17a;
-}
+.tuner-string.target.in-tune { background: var(--ok); border-color: var(--ok); }
 /* Pinned by the player: the tuner ignores every other string until untapped */
-.tuner-string.pinned {
-  box-shadow: 0 0 0 2px var(--accent);
-}
-.tuner-hint {
-  font-size: 12px;
-  color: var(--text2);
-  text-align: center;
-  margin-top: -14px;
-}
+.tuner-string.pinned { box-shadow: 0 0 0 2px var(--accent); }
+.tuner-hint { font-size: 13px; color: var(--text2); text-align: center; margin-top: -4px; }
 .tuner-hint.pinned { color: var(--accent); }
 
 .tuner-start-btn {
+  width: 100%;
+  max-width: 320px;
   background: var(--accent);
-  border: none;
-  border-radius: var(--radius);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 700;
-  font-family: inherit;
-  padding: 14px 32px;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  color: var(--on-accent);
+  font: 700 16px var(--font);
+  padding: 16px 32px;
   cursor: pointer;
-  transition: background .15s;
+  margin-top: 4px;
 }
 .tuner-start-btn:active { background: var(--accent-dim); }
-.tuner-start-btn.active { background: #e05050; }
+.tuner-start-btn.active { background: var(--surface2); border-color: var(--border); color: var(--text); }
 /* Input level, so a dead or muted mic is obvious straight away */
 .tuner-level {
   width: 140px;
@@ -896,76 +851,49 @@ html, body {
   border-radius: 2px;
   background: var(--surface2);
   overflow: hidden;
-  margin-top: -14px;
+  margin-top: -4px;
 }
-.tuner-level-fill {
-  width: 0;
-  height: 100%;
-  background: var(--accent);
-  transition: width .1s linear;
-}
-.tuner-msg {
-  color: var(--text2);
-  font-size: 13px;
-  text-align: center;
-  max-width: 320px;
-  min-height: 18px;
-}
-.tuner-msg.error { color: #e05050; }
+.tuner-level-fill { width: 0; height: 100%; background: var(--accent); transition: width .1s linear; }
+.tuner-msg { color: var(--text2); font-size: 13px; text-align: center; max-width: 320px; min-height: 18px; }
+.tuner-msg.error { color: var(--danger); }
 
 /* ── Practice stats view ── */
 .stats-body {
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 16px;
+  padding: 8px 20px 28px;
 }
 .stats-cards {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-bottom: 24px;
+  gap: 0 28px;
+  margin-bottom: 28px;
 }
 .stats-card {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 8px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 16px 0 18px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-.stats-card.active .stats-num {
-  color: var(--chord);
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
 }
 .stats-num {
-  font-size: 24px;
-  font-weight: 800;
-  color: var(--accent);
-  line-height: 1;
-  text-align: center;
-}
-.stats-card-label {
-  font-size: 11px;
-  color: var(--text2);
-  font-weight: 500;
-  text-align: center;
-}
-.stats-card-sub {
-  font-size: 10px;
-  color: var(--chord);
+  font-family: var(--serif);
+  font-size: 36px;
   font-weight: 600;
-  text-align: center;
-}
-.stats-heading {
-  font-size: 14px;
-  font-weight: 700;
   color: var(--text);
-  margin-bottom: 12px;
+  line-height: 1;
 }
+.stats-card-label { font-size: 13px; color: var(--text2); font-weight: 500; }
+.stats-card-sub { font-size: 12px; color: var(--accent); font-weight: 600; }
+.stats-heading { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
 
-/* ── Practice calendar heatmap (GitHub-style) ── */
+/* ── Practice calendar heatmap ── */
 .calendar {
   display: grid;
   grid-auto-flow: column;
@@ -977,101 +905,58 @@ html, body {
   scrollbar-width: none;
 }
 .calendar::-webkit-scrollbar { display: none; }
-.cal-cell {
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
-  background: var(--surface2);
-}
+.cal-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--surface2); }
 /* Intensity levels — brighter = practiced */
 .cal-cell.lvl-0 { background: var(--surface2); }
-.cal-cell.lvl-1 { background: rgba(124, 106, 239, 0.4); }
-.cal-cell.lvl-2 { background: rgba(124, 106, 239, 0.7); }
+.cal-cell.lvl-1 { background: rgba(216, 164, 70, 0.35); }
+.cal-cell.lvl-2 { background: rgba(216, 164, 70, 0.65); }
 .cal-cell.lvl-3 { background: var(--accent); }
 /* Future days are invisible placeholders that keep the grid aligned */
 .cal-cell.future { background: transparent; }
-.calendar-legend {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--text2);
-  margin-top: 12px;
-}
-.calendar-legend .cal-cell {
-  width: 12px;
-  height: 12px;
-  display: inline-block;
-}
+.calendar-legend { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); margin-top: 14px; }
+.calendar-legend .cal-cell { width: 12px; height: 12px; display: inline-block; }
 
 /* ── Practice time breakdown ── */
-.stats-card-btn {
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  position: relative;
-}
+.stats-card-btn { font: inherit; color: inherit; cursor: pointer; position: relative; }
 /* Chevron hinting that this card opens up */
 .stats-card-btn::after {
   content: "›";
   position: absolute;
-  top: 6px;
-  right: 10px;
-  font-size: 16px;
+  top: 14px;
+  right: 0;
+  font-size: 20px;
   line-height: 1;
   color: var(--text2);
 }
-.stats-card-btn:active { background: var(--border); }
-.practice-total {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 0 4px;
-}
+.stats-card-btn:active .stats-num { color: var(--accent); }
+.practice-total { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 0 4px; }
 .practice-total-num {
-  font-size: 40px;
-  font-weight: 800;
-  color: var(--accent);
+  font-family: var(--serif);
+  font-size: 56px;
+  font-weight: 600;
+  color: var(--text);
   line-height: 1;
 }
-.practice-total-sub {
-  font-size: 12px;
-  color: var(--text2);
-  text-align: center;
-}
-.practice-quick {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin: 18px 0;
-}
+.practice-total-sub { font-size: 13px; color: var(--text2); }
+.practice-quick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 20px 0; }
 .practice-quick-item {
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 4px;
+  border-radius: 12px;
+  padding: 12px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
-.practice-quick-num {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text);
-}
-.practice-quick-label {
-  font-size: 10px;
-  color: var(--text2);
-  text-align: center;
-}
+.practice-quick-num { font-size: 16px; font-weight: 700; color: var(--text); }
+.practice-quick-label { font-size: 11px; color: var(--text2); text-align: center; }
 .practice-tabs {
   display: flex;
   gap: 4px;
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 4px;
   margin-bottom: 14px;
 }
@@ -1079,27 +964,18 @@ html, body {
   flex: 1;
   background: none;
   border: none;
-  border-radius: 7px;
-  padding: 8px 0;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: 9px;
+  padding: 9px 0;
+  font: 600 13px var(--font);
   color: var(--text2);
   cursor: pointer;
 }
-.practice-tab.active {
-  background: var(--accent);
-  color: #fff;
-}
-.practice-periods {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+.practice-tab.active { background: var(--surface2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.practice-periods { display: flex; flex-direction: column; gap: 8px; }
 .practice-period {
-  background: var(--surface2);
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
   overflow: hidden;
 }
 .practice-period.expanded { border-color: var(--accent-dim); }
@@ -1111,96 +987,49 @@ html, body {
   color: inherit;
   text-align: left;
   cursor: pointer;
-  padding: 12px 14px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
-.practice-period-top {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-.practice-period-label {
-  font-size: 14px;
-  font-weight: 700;
-}
-.practice-period-time {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--accent);
-}
-.practice-bar {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--bg);
-  overflow: hidden;
-}
-.practice-bar-fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--accent);
-  min-width: 0;
-}
-.practice-period-meta {
-  font-size: 11px;
-  color: var(--text2);
-}
-.practice-songs {
-  border-top: 1px solid var(--border);
-  padding: 6px 14px 10px;
-}
+.practice-period-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.practice-period-label { font-size: 15px; font-weight: 700; }
+.practice-period-time { font-size: 15px; font-weight: 700; color: var(--accent); }
+.practice-bar { display: block; height: 5px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.practice-bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent); min-width: 0; }
+.practice-period-meta { font-size: 12px; color: var(--text2); }
+.practice-songs { border-top: 1px solid var(--border); padding: 6px 16px 10px; }
 .practice-song {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  padding: 6px 0;
-  font-size: 13px;
+  padding: 7px 0;
+  font-size: 14px;
 }
 .practice-song + .practice-song { border-top: 1px solid var(--border); }
-.practice-song-title {
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.practice-song-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Songs removed from the library still count towards the totals */
 .practice-song-gone {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text2);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1px 5px;
   margin-left: 6px;
 }
-.practice-song-time {
-  color: var(--chord);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.practice-songs-empty {
-  font-size: 12px;
-  color: var(--text2);
-  padding: 6px 0;
-}
-.practice-note {
-  font-size: 11px;
-  color: var(--text2);
-  line-height: 1.5;
-  margin-top: 14px;
+.practice-song-time { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.practice-songs-empty { font-size: 13px; color: var(--text2); padding: 6px 0; }
+.practice-note { font-size: 12px; color: var(--text2); line-height: 1.5; margin-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation-duration: .01ms !important; }
 }
 
 /* ── Jam ── */
-.player-bar .text-btn {
-  padding: 6px 10px;
-}
 .text-btn.is-live {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 .jam-host-bar {
@@ -1208,7 +1037,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 8px 12px 8px 16px;
-  background: #221e38;
+  background: var(--surface2);
   border-bottom: 1px solid var(--border);
 }
 .jam-host-bar[hidden] { display: none !important; }
@@ -1236,7 +1065,7 @@ html, body {
 .jam-text-end {
   background: none;
   border: none;
-  color: #e07070;
+  color: var(--danger);
   font: inherit;
   font-size: 14px;
   font-weight: 700;
@@ -1247,14 +1076,14 @@ html, body {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #3dce7a;
-  box-shadow: 0 0 0 0 rgba(61, 206, 122, 0.6);
+  background: var(--ok);
+  box-shadow: 0 0 0 0 rgba(103, 197, 138, 0.6);
   animation: jam-pulse 1.6s ease-out infinite;
   flex-shrink: 0;
 }
 @keyframes jam-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(61, 206, 122, 0.55); }
-  100% { box-shadow: 0 0 0 8px rgba(61, 206, 122, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(103, 197, 138, 0.55); }
+  100% { box-shadow: 0 0 0 8px rgba(103, 197, 138, 0); }
 }
 @media (prefers-reduced-motion: reduce) {
   .jam-live-dot { animation: none; }
@@ -1264,7 +1093,7 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: #221e38;
+  background: var(--surface2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -1350,7 +1179,7 @@ html, body {
   background: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  color: #e07070;
+  color: var(--danger);
   font: inherit;
   font-size: 15px;
   font-weight: 700;
@@ -1380,7 +1209,7 @@ html, body {
 }
 #jam-code-input:focus { border-color: var(--accent); }
 .jam-join-error {
-  color: #c45c5c;
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.35;
   margin: 0;
@@ -1390,7 +1219,7 @@ html, body {
   background: var(--accent);
   border: none;
   border-radius: var(--radius);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 16px;
   font-weight: 700;
   font-family: inherit;
@@ -1419,7 +1248,7 @@ html, body {
   align-items: center;
   gap: 10px;
   padding: 12px 12px 12px 14px;
-  background: #221e38;
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
@@ -1445,7 +1274,7 @@ html, body {
   background: var(--accent);
   border: none;
   border-radius: 999px;
-  color: #fff;
+  color: var(--on-accent);
   font: inherit;
   font-size: 14px;
   font-weight: 700;

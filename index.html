@@ -5,25 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#1a1a2e">
+  <meta name="theme-color" content="#15110e">
   <title>GuitarScroll</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600;8..60,700&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app">
+  <div id="app" data-view="library-view">
 
     <!-- SONG LIST VIEW -->
     <div id="library-view" class="view active">
       <header class="top-bar">
-        <h1>GuitarScroll</h1>
-        <button id="tuner-btn" class="text-btn" aria-label="Tuner">Tuner</button>
-        <button id="calendar-btn" class="icon-btn" aria-label="Practice calendar">📅</button>
-        <button id="add-song-btn" class="icon-btn" aria-label="Add song">＋</button>
-        <button id="menu-btn" class="icon-btn" aria-label="Menu">⋯</button>
+        <h1>Songs</h1>
+        <button id="add-song-btn" class="icon-btn icon-btn-solid" aria-label="Add song"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="menu-btn" class="icon-btn" aria-label="Menu"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
       </header>
       <div id="menu-dropdown" class="menu-dropdown hidden">
         <button id="join-jam-btn" class="menu-item">Join a jam</button>
@@ -40,7 +39,7 @@
       </div>
       <div class="filter-bar">
         <div class="search-row">
-          <input id="search-input" type="text" placeholder="Search songs..." autocomplete="off">
+          <input id="search-input" type="text" placeholder="Search songs or artists" autocomplete="off">
           <div class="sort-wrap">
             <button id="sort-btn" class="sort-btn" type="button" aria-label="Sort songs" aria-haspopup="true" aria-expanded="false">
               <svg class="sort-btn-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -58,28 +57,28 @@
         </div>
         <div id="proficiency-filter" class="proficiency-filter">
           <button class="filter-pill active" data-level="all">All</button>
-          <button class="filter-pill" data-level="1">1</button>
-          <button class="filter-pill" data-level="2">2</button>
-          <button class="filter-pill" data-level="3">3</button>
-          <button class="filter-pill" data-level="4">4</button>
-          <button class="filter-pill" data-level="5">5</button>
+          <button class="filter-pill" data-level="1">★ 1</button>
+          <button class="filter-pill" data-level="2">★ 2</button>
+          <button class="filter-pill" data-level="3">★ 3</button>
+          <button class="filter-pill" data-level="4">★ 4</button>
+          <button class="filter-pill" data-level="5">★ 5</button>
           <button class="filter-pill" data-level="0">Unrated</button>
         </div>
       </div>
       <p id="song-count" class="song-count" aria-live="polite" hidden></p>
       <div id="song-list" class="song-list"></div>
       <div id="empty-state" class="empty-state">
-        <p>No songs yet</p>
-        <p class="sub">Tap ＋ to add your first song</p>
+        <p>Your library is empty</p>
+        <p class="sub">Tap + and paste an Ultimate Guitar link, or type a song in yourself.</p>
       </div>
     </div>
 
     <!-- ADD / EDIT SONG VIEW -->
     <div id="edit-view" class="view">
       <header class="top-bar">
-        <button id="edit-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <button id="edit-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <h1 id="edit-title">Add Song</h1>
-        <button id="save-song-btn" class="icon-btn" aria-label="Save">✓</button>
+        <button id="save-song-btn" class="text-btn solid" aria-label="Save">Save</button>
       </header>
       <div class="edit-form">
         <div class="ug-import-wrap">
@@ -120,13 +119,13 @@
     <!-- SONG PLAYER VIEW -->
     <div id="player-view" class="view">
       <header class="top-bar player-bar">
-        <button id="player-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <button id="player-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <div class="player-title-wrap">
           <h1 id="player-song-title"></h1>
           <span id="player-song-artist" class="artist-sub"></span>
         </div>
         <button id="jam-btn" class="text-btn" type="button" aria-label="Start a jam">Jam</button>
-        <button id="edit-current-btn" class="icon-btn" aria-label="Edit">✎</button>
+        <button id="edit-current-btn" class="icon-btn" aria-label="Edit"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg></button>
       </header>
       <div id="song-meta" class="song-meta"></div>
       <div id="jam-banner" class="jam-banner" hidden>
@@ -137,9 +136,9 @@
       </div>
       <div id="song-content" class="song-content"></div>
       <div id="scroll-controls" class="scroll-controls">
-        <button id="scroll-slower" class="ctrl-btn">−</button>
-        <button id="scroll-toggle" class="ctrl-btn play-btn">▶</button>
-        <button id="scroll-faster" class="ctrl-btn">＋</button>
+        <button id="scroll-slower" class="ctrl-btn" aria-label="Slower"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+        <button id="scroll-toggle" class="ctrl-btn play-btn" aria-label="Play or pause"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg></button>
+        <button id="scroll-faster" class="ctrl-btn" aria-label="Faster"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
         <span id="speed-label" class="speed-label">10×</span>
       </div>
     </div>
@@ -147,7 +146,7 @@
     <!-- PRACTICE CALENDAR VIEW (global, not per-song) -->
     <div id="stats-view" class="view">
       <header class="top-bar">
-        <button id="stats-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <button id="stats-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <h1>Practice</h1>
       </header>
       <div class="stats-body">
@@ -184,7 +183,7 @@
     <!-- PRACTICE TIME BREAKDOWN (opened from the "Time practiced" card) -->
     <div id="practice-time-view" class="view">
       <header class="top-bar">
-        <button id="practice-time-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <button id="practice-time-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <h1>Practice time</h1>
       </header>
       <div class="stats-body">
@@ -206,7 +205,7 @@
     <!-- TUNER VIEW -->
     <div id="tuner-view" class="view">
       <header class="top-bar">
-        <button id="tuner-back-btn" class="icon-btn" aria-label="Back">←</button>
+        <button id="tuner-back-btn" class="icon-btn" aria-label="Back"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
         <h1>Tuner <span class="tuner-version">v3</span></h1>
         <select id="tuner-tuning" class="tuner-tuning" aria-label="Tuning"></select>
       </header>
@@ -239,6 +238,21 @@
     </div>
 
   </div>
+
+  <nav id="tabbar" class="tabbar" aria-label="Main">
+    <button type="button" id="tab-songs" class="tab" data-tab="songs">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>
+      <span>Songs</span>
+    </button>
+    <button type="button" id="calendar-btn" class="tab" data-tab="practice">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>
+      <span>Practice</span>
+    </button>
+    <button type="button" id="tuner-btn" class="tab" data-tab="tuner">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 0 1 16 0"/><path d="M12 16l3.5-5"/><circle cx="12" cy="16" r="1.2" fill="currentColor"/></svg>
+      <span>Tuner</span>
+    </button>
+  </nav>
 
   <div id="jam-sheet" class="jam-sheet" hidden>
     <div class="jam-card" role="dialog" aria-modal="true" aria-labelledby="jam-sheet-title">
