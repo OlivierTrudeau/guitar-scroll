@@ -1488,7 +1488,45 @@
   function paintTransport(playing) {
     scrollToggle.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
     scrollToggle.classList.toggle("active", !!playing);
+    // Nobody touches the screen while they play, so keep it from dimming and locking
+    keepAwake("scroll", !!playing);
   }
+
+  // ── Keep the screen awake ──
+  // Holds the Screen Wake Lock while anything that needs it is running. The
+  // browser drops the lock whenever the page is hidden, so it is asked for
+  // again when the page comes back.
+  const awakeReasons = new Set();
+  let wakeLock = null;
+  let wakeLockBusy = false;
+
+  async function syncWakeLock() {
+    if (!("wakeLock" in navigator) || wakeLockBusy) return;
+    const wanted = awakeReasons.size > 0 && document.visibilityState === "visible";
+    if (wanted && !wakeLock) {
+      wakeLockBusy = true;
+      try {
+        wakeLock = await navigator.wakeLock.request("screen");
+        wakeLock.addEventListener("release", () => { wakeLock = null; });
+      } catch (e) {
+        wakeLock = null; // refused (low battery, unsupported context): play on regardless
+      }
+      wakeLockBusy = false;
+      // Whatever was asked for while the request was in flight still counts
+      if (!(awakeReasons.size > 0 && document.visibilityState === "visible")) syncWakeLock();
+    } else if (!wanted && wakeLock) {
+      const lock = wakeLock;
+      wakeLock = null;
+      try { await lock.release(); } catch (e) { /* already released */ }
+    }
+  }
+
+  function keepAwake(reason, on) {
+    if (on) awakeReasons.add(reason); else awakeReasons.delete(reason);
+    syncWakeLock();
+  }
+
+  document.addEventListener("visibilitychange", syncWakeLock);
 
   function updateSpeedLabel() {
     speedLabel.textContent = formatSpeed(speed);
@@ -2358,6 +2396,7 @@
       highlightStrings(null);
 
       tunerActive = true;
+      keepAwake("tuner", true);
       tunerToggle.textContent = "Stop tuner";
       tunerToggle.classList.add("active");
       renderWaiting();
@@ -2377,6 +2416,7 @@
 
   function stopTuner() {
     tunerActive = false;
+    keepAwake("tuner", false);
     if (tunerRAF) { cancelAnimationFrame(tunerRAF); tunerRAF = null; }
     // Release the mic so the browser stops showing the recording indicator
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
