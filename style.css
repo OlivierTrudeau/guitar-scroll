@@ -330,26 +330,19 @@ html, body {
 .sort-option:last-child { border-bottom: none; }
 .sort-option:active { background: var(--border); }
 .sort-option.active { color: var(--accent); font-weight: 700; }
-.proficiency-filter {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-  margin: 0 -20px;
-  padding: 0 20px;
-}
-.proficiency-filter::-webkit-scrollbar { display: none; }
+/* All seven filters share one row, so Unrated is never off-screen */
+.proficiency-filter { display: flex; gap: 6px; }
 .filter-pill {
+  flex: 1 1 auto;
   background: none;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text2);
-  font: 600 13px/1 var(--font);
-  padding: 8px 14px;
+  font: 600 12.5px/1 var(--font);
+  padding: 9px 4px;
+  text-align: center;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
 }
 .filter-pill:active { background: var(--surface2); }
 .filter-pill.active {
