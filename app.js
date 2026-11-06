@@ -2777,6 +2777,170 @@
     updateHint();
   })();
 
+
+  // ── Shuffle: let the app pick the next song ──
+  // Practice favours songs you haven't touched in a while and rate lower. Crowd
+  // draws at random from songs rated at or above a threshold. Both build one
+  // shuffled order, so "Another" never repeats until every candidate was shown.
+  const SHUF_MODE_KEY = "guitarscroll_shuffle_mode";
+  const SHUF_LEVEL_KEY = "guitarscroll_shuffle_level";
+  const shufSheet = $("#shuffle-sheet");
+  const shufCard = $("#shuf-card");
+  const shufNext = $("#shuf-next");
+  const shufPlay = $("#shuf-play");
+  let shufMode = "practice";
+  let shufLevel = 3;
+  let shufOrder = [];
+  let shufIdx = 0;
+  try {
+    if (localStorage.getItem(SHUF_MODE_KEY) === "crowd") shufMode = "crowd";
+    const l = parseInt(localStorage.getItem(SHUF_LEVEL_KEY), 10);
+    if (l >= 2 && l <= 5) shufLevel = l;
+  } catch (e) { /* private mode */ }
+
+  function shufWeight(song) {
+    const day = 24 * 60 * 60 * 1000;
+    // Never played counts as long overdue, but not infinitely so
+    const days = song.lastPlayed ? Math.min(180, (Date.now() - song.lastPlayed) / day) : 90;
+    const level = song.proficiency || 2; // unrated: unknown, so treat as middling
+    return (days + 1) * Math.pow(6 - Math.min(5, level), 2);
+  }
+
+  function buildShuffle() {
+    let pool;
+    if (shufMode === "crowd") pool = songs.filter((s) => (s.proficiency || 0) >= shufLevel);
+    else pool = songs.slice();
+    // Weighted shuffle: sort by u^(1/w), so heavier songs tend to come first
+    const keyed = pool.map((s) => ({ id: s.id, k: Math.pow(Math.random(), 1 / (shufMode === "crowd" ? 1 : shufWeight(s))) }));
+    keyed.sort((x, y) => y.k - x.k);
+    shufOrder = keyed.map((x) => x.id);
+    shufIdx = 0;
+  }
+
+  function paintShuffle() {
+    shufSheet.querySelectorAll("#shuf-mode button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === shufMode)));
+    shufSheet.querySelectorAll("#shuf-level button").forEach((b) => b.setAttribute("aria-checked", String(parseInt(b.dataset.level, 10) === shufLevel)));
+    $("#shuf-level-row").hidden = shufMode !== "crowd";
+    $("#shuf-lead").textContent = shufMode === "crowd"
+      ? "Random songs you know well, for playing to people."
+      : "Songs you haven't played in a while and find harder come up first.";
+    const song = songs.find((s) => s.id === shufOrder[shufIdx]);
+    if (!song) {
+      shufCard.innerHTML = '<p class="shuf-empty">' + (songs.length
+        ? (shufMode === "crowd" ? "No songs rated ★" + shufLevel + " or higher yet. Rate some songs, or lower the rating." : "Nothing to suggest yet.")
+        : "Add some songs first.") + "</p>";
+      shufPlay.disabled = true;
+      shufNext.disabled = true;
+      return;
+    }
+    const stars = song.proficiency ? "★" + song.proficiency : "Unrated";
+    shufCard.innerHTML = '<div class="shuf-title">' + esc(song.title || "Untitled") + '</div>'
+      + (song.artist ? '<div class="shuf-artist">' + esc(song.artist) + "</div>" : "")
+      + '<div class="shuf-meta">' + esc(stars) + " · last played " + esc(formatLastPlayed(song.lastPlayed).toLowerCase()) + "</div>";
+    shufPlay.disabled = false;
+    shufNext.disabled = shufOrder.length < 2;
+  }
+
+  function openShuffle() {
+    buildShuffle();
+    paintShuffle();
+    shufSheet.hidden = false;
+  }
+
+  $("#shuffle-btn").addEventListener("click", openShuffle);
+  shufSheet.addEventListener("click", (e) => {
+    if (e.target === shufSheet) { shufSheet.hidden = true; return; }
+    const m = e.target.closest("[data-mode]");
+    const l = e.target.closest("#shuf-level [data-level]");
+    if (m) {
+      shufMode = m.dataset.mode;
+      try { localStorage.setItem(SHUF_MODE_KEY, shufMode); } catch (err) { /* private mode */ }
+      buildShuffle(); paintShuffle();
+    } else if (l) {
+      shufLevel = parseInt(l.dataset.level, 10);
+      try { localStorage.setItem(SHUF_LEVEL_KEY, String(shufLevel)); } catch (err) { /* private mode */ }
+      buildShuffle(); paintShuffle();
+    }
+  });
+  shufNext.addEventListener("click", () => {
+    if (shufOrder.length < 2) return;
+    shufIdx++;
+    if (shufIdx >= shufOrder.length) {
+      // Everything was shown: draw a fresh order, but never open with the song just seen
+      const last = shufOrder[shufOrder.length - 1];
+      buildShuffle();
+      if (shufOrder.length > 1 && shufOrder[0] === last) shufOrder.push(shufOrder.shift());
+    }
+    paintShuffle();
+  });
+  shufPlay.addEventListener("click", () => {
+    const id = shufOrder[shufIdx];
+    if (!id) return;
+    shufSheet.hidden = true;
+    openPlayer(id);
+  });
+
+  // ── Edge swipe: go back ──
+  // Drag in from either screen edge to return to the previous screen, with the
+  // page following the finger. A short flick or a drag that gives up snaps back.
+  const BACK_BUTTONS = {
+    "player-view": "#player-back-btn", "edit-view": "#edit-back-btn", "stats-view": "#stats-back-btn",
+    "practice-time-view": "#practice-time-back-btn", "tuner-view": "#tuner-back-btn",
+  };
+  const EDGE_PX = 24;
+  const BACK_DISTANCE = 90;
+  let edgeSwipe = null;
+
+  function sheetOpen() {
+    return !!document.querySelector(".jam-sheet:not([hidden])");
+  }
+  document.addEventListener("touchstart", (e) => {
+    edgeSwipe = null;
+    if (e.touches.length !== 1 || sheetOpen()) return;
+    const sel = BACK_BUTTONS[appEl.dataset.view];
+    if (!sel) return;
+    const t = e.touches[0];
+    const fromLeft = t.clientX <= EDGE_PX;
+    const fromRight = t.clientX >= window.innerWidth - EDGE_PX;
+    if (!fromLeft && !fromRight) return;
+    edgeSwipe = { x: t.clientX, y: t.clientY, dir: fromLeft ? 1 : -1, active: false, dx: 0, sel, view: document.getElementById(appEl.dataset.view) };
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    const s = edgeSwipe;
+    if (!s) return;
+    const t = e.touches[0];
+    const dx = (t.clientX - s.x) * s.dir;
+    const dy = t.clientY - s.y;
+    if (!s.active) {
+      if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) { edgeSwipe = null; return; } // a scroll
+      if (dx < 8) return;
+      s.active = true;
+      s.view.style.transition = "none";
+    }
+    e.preventDefault(); // keeps the browser's own back gesture out of it
+    s.dx = Math.max(0, dx);
+    s.view.style.transform = "translateX(" + s.dx * s.dir * 0.55 + "px)";
+    s.view.style.opacity = String(1 - Math.min(0.4, s.dx / 600));
+  }, { passive: false });
+
+  function endEdgeSwipe() {
+    const s = edgeSwipe;
+    edgeSwipe = null;
+    if (!s || !s.active) return;
+    const go = s.dx >= BACK_DISTANCE;
+    s.view.style.transition = "";
+    s.view.style.transform = "";
+    s.view.style.opacity = "";
+    if (go) document.querySelector(s.sel).click();
+  }
+  document.addEventListener("touchend", endEdgeSwipe);
+  document.addEventListener("touchcancel", () => {
+    const s = edgeSwipe;
+    edgeSwipe = null;
+    if (s && s.active) { s.view.style.transition = ""; s.view.style.transform = ""; s.view.style.opacity = ""; }
+  });
+
   // ── Jam ──
   // The host publishes the open chart, then where they are in it. Followers
   // render that chart (it may not be in their library) and scroll to the same
