@@ -1687,7 +1687,66 @@
   const ICON_PLAY = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
   const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>';
 
+  // ── Text size & focus mode ──
+  const TEXT_SIZES = [10.5, 11.5, 12.5, 13.5, 15, 16.5, 18, 20, 22];
+  const TEXT_KEY = "guitarscroll_text_size";
+  const FOCUS_KEY = "guitarscroll_focus";
+  let textSize = 13.5;
+  let focusOnPlay = true;
+  try {
+    const t = parseFloat(localStorage.getItem(TEXT_KEY));
+    if (TEXT_SIZES.includes(t)) textSize = t;
+    if (localStorage.getItem(FOCUS_KEY) === "off") focusOnPlay = false;
+  } catch (e) { /* private mode */ }
+  const textPop = $("#text-pop");
+  const textSizeBtn = $("#text-size-btn");
+  const textSmaller = $("#text-smaller");
+  const textLarger = $("#text-larger");
+  const textSizeVal = $("#text-size-val");
+  const focusToggle = $("#focus-toggle");
+  focusToggle.checked = focusOnPlay;
+
+  function applyTextSize(size, keepPlace) {
+    // Keep the same spot in the song under the reader's eyes while the text reflows
+    const range = songContent.scrollHeight - songContent.clientHeight;
+    const frac = keepPlace && range > 0 ? songContent.scrollTop / range : null;
+    textSize = size;
+    songContent.style.setProperty("--song-size", size + "px");
+    textSizeVal.textContent = String(size);
+    const i = TEXT_SIZES.indexOf(size);
+    textSmaller.disabled = i <= 0;
+    textLarger.disabled = i >= TEXT_SIZES.length - 1;
+    refreshFontScale();
+    if (keepPlace) {
+      layoutSheetBlocks(true);
+      const r2 = songContent.scrollHeight - songContent.clientHeight;
+      if (frac !== null) songContent.scrollTop = frac * r2;
+    }
+  }
+  function stepText(dir) {
+    const i = TEXT_SIZES.indexOf(textSize) + dir;
+    if (i < 0 || i >= TEXT_SIZES.length) return;
+    applyTextSize(TEXT_SIZES[i], true);
+    try { localStorage.setItem(TEXT_KEY, String(textSize)); } catch (e) { /* private mode */ }
+  }
+  function setTextPop(open) {
+    textPop.hidden = !open;
+    textSizeBtn.setAttribute("aria-expanded", String(open));
+  }
+  textSizeBtn.addEventListener("click", () => setTextPop(textPop.hidden));
+  textSmaller.addEventListener("click", () => stepText(-1));
+  textLarger.addEventListener("click", () => stepText(1));
+  focusToggle.addEventListener("change", () => {
+    focusOnPlay = focusToggle.checked;
+    try { localStorage.setItem(FOCUS_KEY, focusOnPlay ? "on" : "off"); } catch (e) { /* private mode */ }
+    playerView.classList.toggle("is-focus", focusOnPlay && scrolling);
+  });
+  songContent.addEventListener("pointerdown", () => setTextPop(false));
+  applyTextSize(textSize, false);
+
   function paintTransport(playing) {
+    setTextPop(false);
+    playerView.classList.toggle("is-focus", !!playing && focusOnPlay);
     scrollToggle.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
     scrollToggle.classList.toggle("active", !!playing);
     // Nobody touches the screen while they play, so keep it from dimming and locking
