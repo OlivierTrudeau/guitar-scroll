@@ -53,6 +53,59 @@
   color-scheme: light;
 }
 
+/* Midnight: the app's original indigo look */
+:root[data-theme="midnight"] {
+  --bg: #121218;
+  --surface: #1a1a24;
+  --surface2: #24243a;
+  --border: #2a2a40;
+  --text: #e8e8f0;
+  --text2: #9999b0;
+  --accent: #7c6aef;
+  --accent-dim: #5a4abf;
+  --accent-ink: #a99cff;
+  --on-accent: #ffffff;
+  --chord: #f0c050;
+  --section: var(--accent-ink);
+  --track: #24243a;
+  --bar-bg: rgba(18, 18, 24, .94);
+  --float-bg: rgba(26, 26, 36, .9);
+  --placeholder: #70708a;
+  --shadow: 0 14px 36px rgba(0, 0, 0, .55);
+}
+:root[data-theme="midnight"] body::before { content: none; }
+
+/* Writing: Modern is the default above. Classic is the app's original system
+   fonts; Songbook sets everything in a book serif with a typewriter chart. */
+:root[data-font="classic"] {
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+}
+:root[data-font="songbook"] {
+  --font: 'Iowan Old Style', 'Charter', 'Palatino Linotype', Georgia, serif;
+  --serif: 'Iowan Old Style', 'Charter', 'Palatino Linotype', Georgia, serif;
+  --mono: 'Courier Prime', 'American Typewriter', 'Courier New', Courier, monospace;
+}
+
+/* ── Appearance sheet ── */
+.look-label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); margin: 14px 0 8px; }
+.look-label:first-of-type { margin-top: 6px; }
+.look-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.look-opt {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 12px 6px; border-radius: 14px; border: 1.5px solid var(--border);
+  background: var(--bg); color: var(--text); font: 600 13px var(--font); cursor: pointer;
+}
+.look-opt[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.look-opt b { font: 600 24px/1 var(--sample); }
+.swatch { width: 34px; height: 34px; border-radius: 50%; background: var(--s1); border: 1px solid rgba(128,128,128,.4); position: relative; }
+.swatch::after { content: ""; position: absolute; right: 5px; bottom: 5px; width: 12px; height: 12px; border-radius: 50%; background: var(--s2); }
+
+/* The transport steps aside once playing has started, so it never covers a lyric */
+.scroll-controls { transition: opacity .35s ease, transform .35s ease; }
+.scroll-controls.is-faded { opacity: 0; transform: translateX(-50%) translateY(12px); pointer-events: none; }
+
 /* The iOS home-screen app draws its clock and battery in white over the page,
    so in the light theme the strip under them stays dark to keep them readable. */
 :root[data-theme="light"] body::before {

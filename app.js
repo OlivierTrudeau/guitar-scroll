@@ -1744,7 +1744,23 @@
   songContent.addEventListener("pointerdown", () => setTextPop(false));
   applyTextSize(textSize, false);
 
+  // ── Transport fades while playing ──
+  // It is only needed to change speed or pause. After two seconds of playing
+  // it steps aside so it never covers a lyric, and any touch brings it back.
+  const CONTROLS_FADE_MS = 2000;
+  const controlsEl = $("#scroll-controls");
+  let controlsFadeTimer = 0;
+  function showControls() {
+    clearTimeout(controlsFadeTimer);
+    controlsFadeTimer = 0;
+    controlsEl.classList.remove("is-faded");
+    if (scrolling) controlsFadeTimer = setTimeout(() => controlsEl.classList.add("is-faded"), CONTROLS_FADE_MS);
+  }
+  playerView.addEventListener("pointerdown", () => { if (controlsEl.classList.contains("is-faded") || controlsFadeTimer) showControls(); }, true);
+
   function paintTransport(playing) {
+    // Runs after `scrolling` has been updated by the caller
+    setTimeout(showControls, 0);
     setTextPop(false);
     playerView.classList.toggle("is-focus", !!playing && focusOnPlay);
     scrollToggle.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
@@ -3688,23 +3704,52 @@
   const THEME_KEY = "guitarscroll_theme";
   const themeBtn = $("#theme-btn");
 
+  const FONT_KEY = "guitarscroll_font";
+  const THEME_COLORS = { dark: "#15110e", midnight: "#121218", light: "#faf7f2" };
+  const lookSheet = $("#look-sheet");
+
   function applyTheme(theme) {
-    const light = theme === "light";
-    document.documentElement.dataset.theme = light ? "light" : "dark";
-    themeBtn.textContent = light ? "Dark theme" : "Light theme";
+    if (!THEME_COLORS[theme]) theme = "dark";
+    document.documentElement.dataset.theme = theme;
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", light ? "#faf7f2" : "#15110e");
+    if (meta) meta.setAttribute("content", THEME_COLORS[theme]);
+    lookSheet.querySelectorAll("[data-theme-opt]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.themeOpt === theme)));
+  }
+
+  function applyFont(font) {
+    if (font !== "classic" && font !== "songbook") font = "modern";
+    if (font === "modern") delete document.documentElement.dataset.font;
+    else document.documentElement.dataset.font = font;
+    lookSheet.querySelectorAll("[data-font-opt]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.fontOpt === font)));
+    // Characters change width with the font, so the chart rows are cut again
+    layoutSheetBlocks(true);
+    refreshFontScale();
   }
 
   let savedTheme = "dark";
-  try { savedTheme = localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { /* private mode */ }
+  let savedFont = "modern";
+  try {
+    savedTheme = localStorage.getItem(THEME_KEY) || "dark";
+    savedFont = localStorage.getItem(FONT_KEY) || "modern";
+  } catch (e) { /* private mode */ }
   applyTheme(savedTheme);
+  applyFont(savedFont);
 
   themeBtn.addEventListener("click", () => {
-    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
-    applyTheme(next);
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
     menuDropdown.classList.add("hidden");
+    lookSheet.hidden = false;
+  });
+  lookSheet.addEventListener("click", (e) => {
+    if (e.target === lookSheet) { lookSheet.hidden = true; return; }
+    const t = e.target.closest("[data-theme-opt]");
+    const f = e.target.closest("[data-font-opt]");
+    if (t) {
+      applyTheme(t.dataset.themeOpt);
+      try { localStorage.setItem(THEME_KEY, t.dataset.themeOpt); } catch (err) { /* private mode */ }
+    } else if (f) {
+      applyFont(f.dataset.fontOpt);
+      try { localStorage.setItem(FONT_KEY, f.dataset.fontOpt); } catch (err) { /* private mode */ }
+    }
   });
 
   joinJamBtn.addEventListener("click", () => {
