@@ -2410,9 +2410,40 @@
     }
   }
 
+  // The pitch detector reports about 30 times a second and each report can be a
+  // few cents off the last. Rather than snapping the needle to every one, the
+  // detector only sets a target and a critically damped spring, stepped on every
+  // display frame, glides the needle there: no overshoot, no stepping.
+  const NEEDLE_OMEGA = 15; // rad/s — settles in roughly a quarter of a second
+  let needleTarget = 0;
+  let needlePos = 0;
+  let needleVel = 0;
+  let needleLastT = 0;
+  let needleRAF = null;
+
   function pointNeedle(cents) {
-    const clamped = Math.max(-DIAL_RANGE_CENTS, Math.min(DIAL_RANGE_CENTS, cents));
-    tunerNeedle.style.transform = "rotate(" + (clamped / DIAL_RANGE_CENTS) * DIAL_SWEEP_DEG + "deg)";
+    needleTarget = Math.max(-DIAL_RANGE_CENTS, Math.min(DIAL_RANGE_CENTS, cents));
+    startNeedle();
+  }
+
+  function needleFrame(now) {
+    const dt = Math.min(0.05, Math.max(0.001, (now - (needleLastT || now)) / 1000));
+    needleLastT = now;
+    const w = NEEDLE_OMEGA;
+    // Semi-implicit Euler on x'' = w²(target − x) − 2w·x'
+    needleVel += (w * w * (needleTarget - needlePos) - 2 * w * needleVel) * dt;
+    needlePos += needleVel * dt;
+    const angle = (needlePos / DIAL_RANGE_CENTS) * DIAL_SWEEP_DEG;
+    tunerNeedle.style.transform = "rotate(" + angle.toFixed(2) + "deg)";
+    needleRAF = tunerActive || Math.abs(needlePos - needleTarget) > 0.02 || Math.abs(needleVel) > 0.02
+      ? requestAnimationFrame(needleFrame)
+      : null;
+  }
+
+  function startNeedle() {
+    if (needleRAF) return;
+    needleLastT = 0;
+    needleRAF = requestAnimationFrame(needleFrame);
   }
 
   function buildTuningOptions() {
@@ -2469,10 +2500,11 @@
 
   function renderWaiting() {
     tunerNote.textContent = "—";
+    delete tunerNote.dataset.h;
     tunerNote.className = "tuner-note";
     tunerCents.textContent = "";
     tunerCents.className = "tuner-cents";
-    tunerFreq.textContent = tunerActive ? "Play a string…" : "Tap start & play a string";
+    tunerFreq.textContent = tunerActive ? "Listening…" : "Tap Start to listen";
     tunerStatus.textContent = "—";
     tunerStatus.className = "tuner-status";
     tunerDial.className = "tuner-dial";
@@ -2507,12 +2539,16 @@
 
     if (closeEnough && !stale) inTuneStreak++;
     else if (!closeEnough) inTuneStreak = 0;
-    if (target && inTuneStreak >= IN_TUNE_HOLD_FRAMES) tunedStrings.add(target);
+    if (target && inTuneStreak >= IN_TUNE_HOLD_FRAMES && !tunedStrings.has(target)) {
+      tunedStrings.add(target);
+      // A small tap on phones that allow it, so you can tune without looking
+      try { if (navigator.vibrate) navigator.vibrate(18); } catch (e) { /* unsupported */ }
+    }
 
-    tunerNote.innerHTML =
-      esc(name) + '<span style="font-size:0.4em;vertical-align:super;">' + esc(octave) + "</span>";
+    const noteHtml = esc(name) + '<span class="tuner-oct">' + esc(octave) + "</span>";
+    if (tunerNote.dataset.h !== noteHtml) { tunerNote.innerHTML = noteHtml; tunerNote.dataset.h = noteHtml; }
     tunerCents.textContent = (rounded > 0 ? "+" : rounded < 0 ? "−" : "±") + Math.abs(rounded) + " ¢";
-    tunerFreq.textContent = freq.toFixed(2) + " Hz → " + targetFreq.toFixed(2) + " Hz";
+    tunerFreq.textContent = freq.toFixed(1) + " Hz";
     pointNeedle(cents);
 
     tunerNote.className = "tuner-note " + (closeEnough ? "in-tune" : "detecting");
@@ -2573,7 +2609,7 @@
     const delta = Math.abs(1200 * (targetLog - smoothedLog));
     // Chase hard while the pitch is still moving, then settle down so the
     // needle holds still once the string is steady.
-    const alpha = delta > 20 ? 0.6 : delta > 6 ? 0.3 : 0.12;
+    const alpha = delta > 20 ? 0.7 : delta > 6 ? 0.4 : 0.2;
     smoothedLog += (targetLog - smoothedLog) * alpha;
   }
 
@@ -2657,6 +2693,7 @@
       highlightStrings(null);
 
       tunerActive = true;
+      startNeedle();
       keepAwake("tuner", true);
       tunerToggle.textContent = "Stop tuner";
       tunerToggle.classList.add("active");
@@ -2708,6 +2745,9 @@
 
   function openTuner() {
     showView(tunerView);
+    // Opening the tab is the tap the browser needs to allow the microphone, so
+    // listen straight away instead of making the player hit Start as well.
+    if (!tunerActive) startTuner();
     if (window.Analytics) window.Analytics.track("tuner-open");
   }
 
