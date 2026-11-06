@@ -585,13 +585,14 @@ html, body {
   font-weight: 700;
   line-height: 1.15;
   color: var(--section);
-  margin: 26px 0 10px;
+  margin: 24px 0 12px;
   padding-left: 10px;
   border-left: 3px solid var(--accent);
   white-space: normal;
 }
 .line-lyric { color: var(--text); }
-.line-empty { display: block; height: 8px; }
+.line-empty { display: block; height: 14px; }
+.song-content > .line-section:first-child { margin-top: 4px; }
 .strum-pattern {
   display: block;
   color: var(--text);

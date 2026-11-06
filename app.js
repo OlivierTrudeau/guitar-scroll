@@ -1224,13 +1224,22 @@
 
   function renderParsed(parsed) {
     let html = "";
-    for (const item of parsed) {
+    for (let i = 0; i < parsed.length; i++) {
+      const item = parsed[i];
       switch (item.type) {
-        case "empty":
-          html += `<span class="line-empty"></span>\n`;
+        case "empty": {
+          // Section headings carry their own space above and below, so blank
+          // lines at the start, in runs, or beside a heading would only stack up.
+          const prev = parsed[i - 1];
+          const next = parsed[i + 1];
+          if (!prev || prev.type === "empty" || prev.type === "section") break;
+          if (!next || next.type === "section") break;
+          // A block element: the newline after it would render as a blank line of its own
+          html += `<span class="line-empty"></span>`;
           break;
+        }
         case "section":
-          html += `<span class="line-section">${esc(item.text)}</span>\n`;
+          html += `<span class="line-section">${esc(item.text)}</span>`;
           break;
         case "chord-only":
           html += `<span class="line-chord">${esc(item.text)}</span>\n`;
