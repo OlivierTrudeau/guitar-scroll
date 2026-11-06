@@ -11,6 +11,7 @@
 
   // ── DOM refs ──
   const $ = (s) => document.querySelector(s);
+  const appEl = document.getElementById("app");
   const libraryView = $("#library-view");
   const editView = $("#edit-view");
   const playerView = $("#player-view");
@@ -431,6 +432,7 @@
   function showView(view) {
     [libraryView, editView, playerView, statsView, practiceTimeView, tunerView].forEach((v) => v.classList.remove("active"));
     view.classList.add("active");
+    appEl.dataset.view = view.id;
     stopScroll();
     // Leaving the player stops the practice clock and banks whatever it counted
     if (view !== playerView) stopPracticeClock();
@@ -481,7 +483,7 @@
     for (let i = 1; i <= 5; i++) {
       stars += i <= level ? '<span class="star filled">★</span>' : '<span class="star">★</span>';
     }
-    return `<span class="prof-badge level-${level}">${stars} <span class="prof-text">${labels[level]}</span></span>`;
+    return `<span class="prof-badge level-${level}" role="img" aria-label="${labels[level]}">${stars}</span>`;
   }
 
   // "3 songs" normally, "3 of 12 songs" once a search or rating narrows the list.
@@ -518,13 +520,13 @@
         <div class="song-item-info">
           <div class="song-item-title">${esc(song.title || "Untitled")}</div>
           <div class="song-item-artist">${esc(song.artist || "")}</div>
-          <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
           <div class="song-item-meta-row">
             ${lastPlayedBadge(song.lastPlayed)}
             ${practiceCountBadge(song.practiceCount)}
           </div>
         </div>
-        <button class="song-item-delete" data-id="${song.id}" aria-label="Delete">✕</button>`;
+        <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
+        <button class="song-item-delete" data-id="${song.id}" aria-label="Delete ${esc(song.title || "song")}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>`;
       el.querySelector(".song-item-info").addEventListener("click", () => openPlayer(song.id));
       el.querySelector(".song-item-delete").addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1273,13 +1275,13 @@
     applySpeed(song.speed || DEFAULT_SPEED);
 
     songMeta.innerHTML = "";
-    if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo:</strong> ${esc(song.capo)}</span>`;
+    if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo</strong> ${esc(song.capo)}</span>`;
     if (!opts.follow && song.speed) {
-      songMeta.innerHTML += `<span class="meta-tag"><strong>Speed:</strong> ${esc(formatSpeed(song.speed))}</span>`;
+      songMeta.innerHTML += `<span class="meta-tag"><strong>Speed</strong> ${esc(formatSpeed(song.speed))}</span>`;
     }
     if (!opts.follow) {
       const rusty = isRusty(song.lastPlayed);
-      songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
+      songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
     }
 
     let contentHTML = "";
@@ -1471,8 +1473,11 @@
     if (wasScrolling) jamFlushPlay(true);
   }
 
+  const ICON_PLAY = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
+  const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>';
+
   function paintTransport(playing) {
-    scrollToggle.textContent = playing ? "❚❚" : "▶";
+    scrollToggle.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
     scrollToggle.classList.toggle("active", !!playing);
   }
 
@@ -1595,14 +1600,13 @@
   function lastPlayedBadge(ts) {
     const rusty = isRusty(ts);
     const cls = "song-item-lastplayed" + (rusty ? " rusty" : "") + (!ts ? " never" : "");
-    const icon = rusty ? "⏳ " : "";
-    return `<div class="${cls}">${icon}${esc(formatLastPlayed(ts))}</div>`;
+    return `<div class="${cls}">${esc(formatLastPlayed(ts))}</div>`;
   }
 
   // Re-renders just the "last played" meta tag in the open player (after a play is recorded)
   function renderLastPlayedMeta(song) {    const existing = songMeta.querySelector(".meta-tag.last-played");
     const rusty = isRusty(song.lastPlayed);
-    const html = `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played:</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
+    const html = `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
     // Replace the existing tag in place if present
     if (existing) {
       existing.outerHTML = html;
@@ -1617,7 +1621,7 @@
     const n = count || 0;
     // No sessions yet — nothing to show
     if (!n) return "";
-    return `<span class="practice-badge">🎸 ${n}×</span>`;
+    return `<span class="practice-badge">${n} ${n === 1 ? "session" : "sessions"}</span>`;
   }
 
   // Seconds practised per day, summed across every song
@@ -3175,6 +3179,7 @@
   // ── Event Wiring ──
   addSongBtn.addEventListener("click", () => openEditor(null));
   calendarBtn.addEventListener("click", openPracticeCalendar);
+  $("#tab-songs").addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
   ugImportBtn.addEventListener("click", handleUgImport);
