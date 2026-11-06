@@ -143,6 +143,7 @@
   const MAX_SPEED = 50;
   const DEFAULT_SPEED = 10;
   let speed = DEFAULT_SPEED;
+  let speedEstimated = false;
   let scrollRAF = null;
   let playedTimer = null;
   let practiceSongId = null;
@@ -218,9 +219,43 @@
     return clampSpeed(n) + "×";
   }
 
-  function applySpeed(n) {
+  function applySpeed(n, estimated) {
     speed = clampSpeed(n);
+    speedEstimated = !!estimated;
     updateSpeedLabel();
+  }
+
+  // Speed is measured in lines of text per second, not pixels, so changing the
+  // text size doesn't change the pace. 13.5px is the size 1× was tuned at.
+  const BASE_FONT_PX = 13.5;
+  let fontScale = 1;
+  function refreshFontScale() {
+    const px = parseFloat(getComputedStyle(songContent).fontSize);
+    fontScale = px > 0 ? px / BASE_FONT_PX : 1;
+  }
+
+  // How long a player takes over each kind of line, in seconds. A guess, but
+  // a song of N lines lasts roughly N times this, whatever its tempo.
+  const LINE_SECONDS = { "chord-lyric": 3.4, "inline-chord": 3.4, lyric: 3, "chord-only": 2.6, section: 1.6, empty: 0.4 };
+  let lastParsedItems = [];
+
+  // Picks a starting speed for a song that has none saved: spread the song's
+  // estimated length over the distance the scroller has to cover.
+  function estimateSpeed(items, scrollDistance) {
+    let seconds = 0;
+    for (const item of items) seconds += LINE_SECONDS[item.type] || 3;
+    seconds = Math.min(600, Math.max(60, seconds));
+    const pxPerSec = scrollDistance / seconds;
+    const est = pxPerSec / (4 * fontScale);
+    return Math.min(10, Math.max(1.5, Math.round(est * 2) / 2));
+  }
+
+  function applyEstimatedSpeed(song) {
+    if (!song || song.speed || !songContent.clientHeight) return;
+    refreshFontScale();
+    const distance = songContent.scrollHeight - songContent.clientHeight - 100;
+    if (distance <= 0) return;
+    applySpeed(estimateSpeed(lastParsedItems, distance), true);
   }
 
   // ── Persistence ──
@@ -1459,12 +1494,14 @@
     if (song.strum) {
       contentHTML += `<span class="strum-pattern">Strum: ${esc(song.strum)}</span>`;
     }
-    contentHTML += renderParsed(parseBody(song.body || ""));
+    lastParsedItems = parseBody(song.body || "");
+    contentHTML += renderParsed(lastParsedItems);
     songContent.innerHTML = contentHTML;
     if (!opts.keepScroll) songContent.scrollTop = 0;
     setFollowChrome(!!opts.follow);
     if (!opts.deferShow) showView(playerView);
     layoutSheetBlocks(true);
+    if (!opts.follow) applyEstimatedSpeed(song);
     if (!opts.follow) maybeShowChordHint();
   }
 
@@ -1480,6 +1517,7 @@
     }
     showView(playerView);
     layoutSheetBlocks(true);
+    applyEstimatedSpeed(song);
     if (hosting) jamFlushPlay(true);
     startPracticeClock(id);
     refreshJamChrome();
@@ -1545,12 +1583,13 @@
     }
     let last = performance.now();
     let accum = 0;
+    refreshFontScale();
 
     function tick(now) {
       if (!scrolling) return;
       const dt = now - last;
       last = now;
-      accum += speed * dt * 0.004;
+      accum += speed * fontScale * dt * 0.004;
       if (accum >= 1) {
         const px = Math.floor(accum);
         songContent.scrollTop += px;
@@ -1692,7 +1731,7 @@
   document.addEventListener("visibilitychange", syncWakeLock);
 
   function updateSpeedLabel() {
-    speedLabel.textContent = formatSpeed(speed);
+    speedLabel.textContent = (speedEstimated ? "≈" : "") + formatSpeed(speed);
   }
 
   // ── Auto-import raw text files ──
@@ -3520,12 +3559,12 @@
   });
   scrollSlower.addEventListener("click", () => {
     if (jamIsFollow() || followRev) return;
-    applySpeed(speed - 1);
+    applySpeed(speed - (speed <= 5 ? 0.5 : 1));
     jamFlushPlay(true);
   });
   scrollFaster.addEventListener("click", () => {
     if (jamIsFollow() || followRev) return;
-    applySpeed(speed + 1);
+    applySpeed(speed + (speed < 5 ? 0.5 : 1));
     jamFlushPlay(true);
   });
 
