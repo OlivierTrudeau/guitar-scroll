@@ -16,6 +16,12 @@
   const toastText = $("#toast-text");
   const toastAction = $("#toast-action");
   const deleteSongBtn = $("#delete-song-btn");
+  const chordCardEl = $("#chord-card");
+  const chordCardName = $("#chord-card-name");
+  const chordCardNote = $("#chord-card-note");
+  const chordCardDiagram = $("#chord-card-diagram");
+  const chordCardNext = $("#chord-card-next");
+  const chordCardClose = $("#chord-card-close");
   const libraryView = $("#library-view");
   const editView = $("#edit-view");
   const playerView = $("#player-view");
@@ -437,6 +443,7 @@
     [libraryView, editView, playerView, statsView, practiceTimeView, tunerView].forEach((v) => v.classList.remove("active"));
     view.classList.add("active");
     appEl.dataset.view = view.id;
+    closeChordCard();
     stopScroll();
     // Leaving the player stops the practice clock and banks whatever it counted
     if (view !== playerView) stopPracticeClock();
@@ -544,6 +551,59 @@
     });
   }
 
+  // ── Tap a chord to see how to play it ──
+  // The card floats above the play controls, so the chart keeps scrolling
+  // behind it and you can look at the shape without losing your place.
+  const CHORD_HINT_KEY = "guitarscroll_hint_chords";
+  let chordShapes = [];
+  let chordShapeIndex = 0;
+  let chordCardFor = null;
+  let chordCardTrigger = null;
+
+  function paintChordShape() {
+    if (!chordShapes.length) {
+      chordCardDiagram.innerHTML = "";
+      chordCardNext.hidden = true;
+      return;
+    }
+    chordCardDiagram.innerHTML = window.Chords.svg(chordShapes[chordShapeIndex], `${chordCardName.textContent} chord shape`);
+    chordCardNext.hidden = chordShapes.length < 2;
+    chordCardNext.textContent = `Other shape (${chordShapeIndex + 1}/${chordShapes.length})`;
+  }
+
+  function openChordCard(token, trigger) {
+    // Tapping the chord that is already showing puts the card away
+    if (!chordCardEl.hidden && chordCardFor === token) { closeChordCard(); return; }
+    const parsed = window.Chords && window.Chords.parse(token);
+    if (!parsed) return;
+    if (chordCardTrigger) chordCardTrigger.classList.remove("is-open");
+    chordCardTrigger = trigger || null;
+    if (chordCardTrigger) chordCardTrigger.classList.add("is-open");
+    chordCardFor = token;
+    chordShapes = window.Chords.voicings(parsed);
+    chordShapeIndex = 0;
+    chordCardName.textContent = parsed.name;
+    chordCardNote.textContent = chordShapes.length ? window.Chords.describe(parsed) : "No shape on file for this chord yet";
+    paintChordShape();
+    chordCardEl.hidden = false;
+  }
+
+  function closeChordCard() {
+    chordCardEl.hidden = true;
+    chordCardFor = null;
+    if (chordCardTrigger) chordCardTrigger.classList.remove("is-open");
+    chordCardTrigger = null;
+  }
+
+  function maybeShowChordHint() {
+    try {
+      if (localStorage.getItem(CHORD_HINT_KEY)) return;
+      if (!songContent.querySelector(".chord")) return;
+      localStorage.setItem(CHORD_HINT_KEY, "1");
+    } catch (e) { return; }
+    showToast("Tap any chord to see how to play it", "", null);
+  }
+
   // ── Swipe a song left to delete it (with Undo) ──
   let swipeClickBlockedUntil = 0;
 
@@ -622,7 +682,7 @@
   function showToast(text, actionLabel, onAction) {
     clearTimeout(undoTimer);
     toastText.textContent = text;
-    toastAction.textContent = actionLabel;
+    toastAction.textContent = actionLabel || "";
     toastAction.hidden = !onAction;
     toastAction.onclick = () => { hideToast(); if (onAction) onAction(); };
     toastEl.hidden = false;
@@ -1136,7 +1196,7 @@
   }
 
   // ── Parser ──
-  const CHORD_RE = /^[A-G][#b]?(m|maj|min|dim|aug|sus|add|M)?[0-9]?[0-9]?(\/(A-G)[#b]?)?(\*)?$/;
+  const CHORD_RE = /^[A-G][#b]?(m|maj|min|dim|aug|sus|add|M)?[0-9]?[0-9]?(\/[A-G][#b]?)?(\*)?$/;
   const SECTION_RE = /^\[(.+)\]$/;
 
   function isChordToken(token) {
@@ -1265,13 +1325,22 @@
       const chordSlice = chordLine.slice(start, end).trimEnd();
       const lyricSlice = lyricLine.slice(start, end).trimEnd();
       if (chordSlice || lyricSlice) {
-        const chordHtml = chordSlice ? `<span class="line-chord">${esc(chordSlice)}</span>` : "";
+        const chordHtml = chordSlice ? `<span class="line-chord">${chordMarkup(chordSlice)}</span>` : "";
         const lyricHtml = `<span class="line-lyric">${lyricSlice ? esc(lyricSlice) : "\u00a0"}</span>`;
         rows.push(`<span class="sheet-row">${chordHtml}${lyricHtml}</span>`);
       }
       start = end;
     }
     return rows.join("");
+  }
+
+  // Wraps each chord in its own tappable span. Only the text changes, never the
+  // spacing, so the chords stay in the columns the sheet gives them.
+  function chordMarkup(text) {
+    return text.replace(/\S+/g, (token) => {
+      const parsed = window.Chords && window.Chords.parse(token);
+      return parsed ? `<span class="chord" data-chord="${escAttr(token)}">${esc(token)}</span>` : esc(token);
+    });
   }
 
   function escAttr(s) {
@@ -1335,7 +1404,7 @@
           html += `<span class="line-section">${esc(item.text)}</span>`;
           break;
         case "chord-only":
-          html += `<span class="line-chord">${esc(item.text)}</span>\n`;
+          html += `<span class="line-chord">${chordMarkup(item.text)}</span>\n`;
           break;
         case "chord-lyric":
           html += renderChordLyric(item.chords, item.lyrics);
@@ -1345,7 +1414,7 @@
           let out = "";
           for (const p of parts) {
             if (p.startsWith("[") && p.endsWith("]")) {
-              out += `<span class="line-chord">${esc(p.slice(1, -1))}</span> `;
+              out += `<span class="line-chord">${chordMarkup(p.slice(1, -1))}</span> `;
             } else {
               out += esc(p);
             }
@@ -1396,6 +1465,7 @@
     setFollowChrome(!!opts.follow);
     if (!opts.deferShow) showView(playerView);
     layoutSheetBlocks(true);
+    if (!opts.follow) maybeShowChordHint();
   }
 
   function openPlayer(id) {
@@ -3324,6 +3394,16 @@
   $("#tab-songs").addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
+  songContent.addEventListener("click", (e) => {
+    const chord = e.target.closest(".chord");
+    if (chord) openChordCard(chord.dataset.chord, chord);
+  });
+  chordCardNext.addEventListener("click", () => {
+    chordShapeIndex = (chordShapeIndex + 1) % chordShapes.length;
+    paintChordShape();
+  });
+  chordCardClose.addEventListener("click", closeChordCard);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChordCard(); });
   deleteSongBtn.addEventListener("click", () => {
     const song = songs.find((s) => s.id === editingId);
     if (!song) return;

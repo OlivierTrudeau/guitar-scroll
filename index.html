@@ -266,6 +266,16 @@
     </button>
   </nav>
 
+  <div id="chord-card" class="chord-card" role="dialog" aria-label="Chord shape" hidden>
+    <div id="chord-card-diagram" class="chord-card-diagram"></div>
+    <div class="chord-card-info">
+      <div id="chord-card-name" class="chord-card-name"></div>
+      <div id="chord-card-note" class="chord-card-note"></div>
+      <button type="button" id="chord-card-next" class="text-btn chord-card-next" hidden>Other shape</button>
+    </div>
+    <button type="button" id="chord-card-close" class="icon-btn chord-card-close" aria-label="Close chord shape"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite" hidden>
     <span id="toast-text"></span>
     <button type="button" id="toast-action" class="toast-action">Undo</button>
@@ -315,6 +325,7 @@
   </div>
   <script src="analytics.js"></script>
   <script src="pitch.js"></script>
+  <script src="chords.js"></script>
   <script src="jam.js"></script>
   <script src="app.js"></script>
 </body>
