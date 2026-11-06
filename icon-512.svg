@@ -1,8 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="100" fill="#1a1a2e"/>
-  <text x="256" y="210" text-anchor="middle" font-family="Arial, sans-serif" font-size="160" fill="#7c6aef">j</text>
-  <text x="256" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="58" fill="#f0c050">SCROLL</text>
-  <rect x="140" y="380" width="232" height="10" rx="5" fill="#7c6aef" opacity="0.5"/>
-  <rect x="110" y="405" width="292" height="10" rx="5" fill="#7c6aef" opacity="0.3"/>
-  <rect x="150" y="430" width="212" height="10" rx="5" fill="#7c6aef" opacity="0.15"/>
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="42%" r="70%">
+      <stop offset="0" stop-color="#2a2019"/>
+      <stop offset="1" stop-color="#15110e"/>
+    </radialGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e6b552"/>
+      <stop offset="1" stop-color="#c8932f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#glow)"/>
+  <path d="M256 104C176 104 104 116 104 184C104 262 188 366 256 424C324 366 408 262 408 184C408 116 336 104 256 104Z" fill="url(#brass)"/>
+  <g fill="none" stroke="#15110e" stroke-width="22" stroke-linecap="round">
+    <path d="M196 190H316"/>
+    <path d="M214 240H298" opacity=".8"/>
+    <path d="M232 290H280" opacity=".6"/>
+  </g>
 </svg>
