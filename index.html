@@ -137,8 +137,17 @@
           <span id="player-song-artist" class="artist-sub"></span>
         </div>
         <button id="jam-btn" class="text-btn" type="button" aria-label="Start a jam">Jam</button>
+        <button id="text-size-btn" class="icon-btn text-size-btn" aria-label="Text size" aria-expanded="false"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M3 18l4.6-12h1.8L14 18h-2l-1.1-3H6.1L5 18H3zm3.7-4.6h3.6L8.5 8.5 6.7 13.4zM15.5 18l2.8-7.2h1.4l2.8 7.2h-1.6l-.6-1.8h-2.6l-.6 1.8h-1.4z" opacity=".95"/></svg></button>
         <button id="edit-current-btn" class="icon-btn" aria-label="Edit"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg></button>
       </header>
+      <div id="text-pop" class="text-pop" hidden>
+        <div class="text-pop-row">
+          <button id="text-smaller" class="text-step" type="button" aria-label="Smaller text"><span style="font-size:13px">A</span></button>
+          <span id="text-size-val" class="text-size-val">13.5</span>
+          <button id="text-larger" class="text-step" type="button" aria-label="Larger text"><span style="font-size:21px">A</span></button>
+        </div>
+        <label class="text-pop-opt"><input type="checkbox" id="focus-toggle" checked> Hide the title bar while playing</label>
+      </div>
       <div id="song-meta" class="song-meta"></div>
       <div id="jam-banner" class="jam-banner" hidden>
         <span class="jam-live-dot" aria-hidden="true"></span>
