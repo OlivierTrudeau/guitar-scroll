@@ -2819,6 +2819,40 @@
     shufIdx = 0;
   }
 
+  // The queue: songs picked by hand (people's requests). In Crowd mode they
+  // play first, in order, before any random pick.
+  const QUEUE_KEY = "guitarscroll_queue";
+  let shufQueue = [];
+  try { shufQueue = JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; } catch (e) { shufQueue = []; }
+  function saveQueue() {
+    shufQueue = shufQueue.filter((id) => songs.some((s) => s.id === id));
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(shufQueue)); } catch (e) { /* private mode */ }
+  }
+  function queueActive() {
+    saveQueue();
+    return shufMode === "crowd" && shufQueue.length > 0;
+  }
+  // What plays next: the head of the queue, else the current random suggestion
+  function nextCandidate() {
+    return queueActive() ? { id: shufQueue[0], fromQueue: true } : { id: shufOrder[shufIdx], fromQueue: false };
+  }
+
+  function paintQueue() {
+    const box = $("#shuf-queue");
+    box.hidden = shufMode !== "crowd";
+    if (shufMode !== "crowd") return;
+    saveQueue();
+    $("#shuf-queue-title").textContent = shufQueue.length ? "Queue · " + shufQueue.length : "Queue";
+    $("#shuf-queue-empty").hidden = shufQueue.length > 0;
+    $("#shuf-queue-list").innerHTML = shufQueue.map((id, i) => {
+      const s = songs.find((x) => x.id === id);
+      return '<li data-id="' + esc(id) + '"><span class="sq-num">' + (i + 1) + '</span><span class="sq-text"><b>' + esc(s.title || "Untitled") + "</b>"
+        + (s.artist ? "<span>" + esc(s.artist) + "</span>" : "") + "</span>"
+        + (i > 0 ? '<button type="button" class="sq-btn" data-act="top" aria-label="Play next">↑</button>' : "")
+        + '<button type="button" class="sq-btn" data-act="remove" aria-label="Remove from queue">✕</button></li>';
+    }).join("");
+  }
+
   function paintShuffle() {
     shufSheet.querySelectorAll("#shuf-mode button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.mode === shufMode)));
     shufSheet.querySelectorAll("#shuf-level button").forEach((b) => b.setAttribute("aria-checked", String(parseInt(b.dataset.level, 10) === shufLevel)));
@@ -2826,7 +2860,10 @@
     $("#shuf-lead").textContent = shufMode === "crowd"
       ? "Random songs you know well, for playing to people."
       : "Songs you haven't played in a while and find harder come up first.";
-    const song = songs.find((s) => s.id === shufOrder[shufIdx]);
+    paintQueue();
+    shufNext.hidden = false;
+    const cand = nextCandidate();
+    const song = songs.find((s) => s.id === cand.id);
     if (!song) {
       shufCard.innerHTML = '<p class="shuf-empty">' + (songs.length
         ? (shufMode === "crowd" ? "No songs rated ★" + shufLevel + " or higher yet. Rate some songs, or lower the rating." : "Nothing to suggest yet.")
@@ -2836,11 +2873,12 @@
       return;
     }
     const stars = song.proficiency ? "★" + song.proficiency : "Unrated";
-    shufCard.innerHTML = '<div class="shuf-title">' + esc(song.title || "Untitled") + '</div>'
+    shufCard.innerHTML = '<div class="shuf-tag">' + (cand.fromQueue ? "Next in the queue" : "Random pick") + '</div><div class="shuf-title">' + esc(song.title || "Untitled") + '</div>'
       + (song.artist ? '<div class="shuf-artist">' + esc(song.artist) + "</div>" : "")
       + '<div class="shuf-meta">' + esc(stars) + " · last played " + esc(formatLastPlayed(song.lastPlayed).toLowerCase()) + "</div>";
     shufPlay.disabled = false;
-    shufNext.disabled = shufOrder.length < 2;
+    shufNext.disabled = cand.fromQueue || shufOrder.length < 2;
+    shufNext.hidden = cand.fromQueue;
   }
 
   function openShuffle() {
@@ -2881,10 +2919,11 @@
   }
 
   shufPlay.addEventListener("click", () => {
-    const id = shufOrder[shufIdx];
-    if (!id) return;
+    const cand = nextCandidate();
+    if (!cand.id) return;
     shufSheet.hidden = true;
-    openPlayer(id);
+    if (cand.fromQueue) { shufQueue.shift(); saveQueue(); }
+    openPlayer(cand.id);
     shufRunning = true; // set after openPlayer, which clears any earlier run
   });
 
@@ -2908,16 +2947,22 @@
     shufRunning = false;
     hideNextUp();
   }
+  let nextUpFromQueue = false;
   function playNextUp() {
-    const id = shufOrder[shufIdx];
+    const cand = nextCandidate();
     hideNextUp();
-    if (!id) { endShuffleRun(); return; }
-    openPlayer(id);
+    if (!cand.id) { endShuffleRun(); return; }
+    if (cand.fromQueue) { shufQueue.shift(); saveQueue(); }
+    openPlayer(cand.id);
     shufRunning = true;
   }
   function paintNextUp() {
-    const song = songs.find((s) => s.id === shufOrder[shufIdx]);
+    const cand = nextCandidate();
+    nextUpFromQueue = cand.fromQueue;
+    const song = songs.find((s) => s.id === cand.id);
     if (!song) { endShuffleRun(); return; }
+    $("#next-up-kicker").textContent = cand.fromQueue ? "Up next · From the queue" : "Up next · Shuffle";
+    $("#next-up-skip").hidden = cand.fromQueue && shufQueue.length < 2;
     $("#next-up-title").textContent = song.title || "Untitled";
     $("#next-up-artist").textContent = song.artist || "";
   }
@@ -2936,9 +2981,13 @@
     $("#next-up-fill").style.transform = "scaleX(0)";
   }
   function onScrollReachedEnd() {
-    if (!shufRunning || jamIsFollow() || followRev || shufOrder.length < 2) return;
-    // The song just finished is shufOrder[shufIdx]; suggest the one after it
-    advanceShuffle();
+    if (!shufRunning || jamIsFollow() || followRev) return;
+    // Queued requests come first. Otherwise the song just finished is
+    // shufOrder[shufIdx], so suggest the one after it.
+    if (!queueActive()) {
+      if (shufOrder.length < 2) return;
+      advanceShuffle();
+    }
     paintNextUp();
     $("#next-up-fill").style.transform = "";
     nextUp.hidden = false;
@@ -2947,8 +2996,57 @@
     startNextUpCountdown();
   }
   $("#next-up-go").addEventListener("click", playNextUp);
-  $("#next-up-skip").addEventListener("click", () => { advanceShuffle(); paintNextUp(); $("#next-up-fill").style.transform = ""; startNextUpCountdown(); });
+  $("#next-up-skip").addEventListener("click", () => {
+    if (nextUpFromQueue) { shufQueue.push(shufQueue.shift()); saveQueue(); } else advanceShuffle();
+    paintNextUp(); $("#next-up-fill").style.transform = ""; startNextUpCountdown();
+  });
   $("#next-up-stop").addEventListener("click", endShuffleRun);
+  // Queue editing in the shuffle sheet
+  $("#shuf-queue-list").addEventListener("click", (e) => {
+    const btn = e.target.closest(".sq-btn");
+    const li = e.target.closest("li");
+    if (!btn || !li) return;
+    const id = li.dataset.id;
+    if (btn.dataset.act === "remove") shufQueue = shufQueue.filter((x) => x !== id);
+    else if (btn.dataset.act === "top") shufQueue = [id].concat(shufQueue.filter((x) => x !== id));
+    saveQueue();
+    paintShuffle();
+  });
+  const queuePicker = $("#queue-picker");
+  const queueSearch = $("#queue-search");
+  function paintQueuePicker() {
+    const q = queueSearch.value.trim().toLowerCase();
+    const list = songs.filter((s) => !q || (s.title || "").toLowerCase().includes(q) || (s.artist || "").toLowerCase().includes(q))
+      .sort((x, y) => (x.title || "").localeCompare(y.title || ""));
+    $("#queue-pick-list").innerHTML = list.length ? list.map((s) => {
+      const on = shufQueue.includes(s.id);
+      return '<button type="button" class="queue-pick' + (on ? " on" : "") + '" data-id="' + esc(s.id) + '" aria-pressed="' + on + '"><span class="sq-text"><b>'
+        + esc(s.title || "Untitled") + "</b>" + (s.artist ? "<span>" + esc(s.artist) + "</span>" : "") + '</span><span class="qp-state">' + (on ? "✓" : "") + "</span></button>";
+    }).join("") : '<p class="shuf-queue-empty">No songs match.</p>';
+  }
+  $("#shuf-queue-add").addEventListener("click", () => {
+    queueSearch.value = "";
+    paintQueuePicker();
+    shufSheet.hidden = true;
+    queuePicker.hidden = false;
+  });
+  $("#queue-pick-list").addEventListener("click", (e) => {
+    const b = e.target.closest(".queue-pick");
+    if (!b) return;
+    const id = b.dataset.id;
+    shufQueue = shufQueue.includes(id) ? shufQueue.filter((x) => x !== id) : shufQueue.concat(id);
+    saveQueue();
+    paintQueuePicker();
+  });
+  queueSearch.addEventListener("input", paintQueuePicker);
+  function closeQueuePicker() {
+    queuePicker.hidden = true;
+    paintShuffle();
+    shufSheet.hidden = false;
+  }
+  $("#queue-done").addEventListener("click", closeQueuePicker);
+  queuePicker.addEventListener("click", (e) => { if (e.target === queuePicker) closeQueuePicker(); });
+
   // Still playing the last lines: touching the chart holds the countdown
   songContent.addEventListener("pointerdown", () => { if (!nextUp.hidden && nextUpTimer) stopNextUpCountdown(); });
 

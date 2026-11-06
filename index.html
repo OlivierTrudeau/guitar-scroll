@@ -325,11 +325,25 @@
           <button type="button" role="radio" data-level="5">★5</button>
         </div>
       </div>
+      <div id="shuf-queue" class="shuf-queue" hidden>
+        <div class="shuf-queue-head"><span id="shuf-queue-title">Queue</span><button type="button" id="shuf-queue-add" class="text-btn">+ Add songs</button></div>
+        <ol id="shuf-queue-list" class="shuf-queue-list"></ol>
+        <p id="shuf-queue-empty" class="shuf-queue-empty">Queue songs people ask for. They play before the random picks.</p>
+      </div>
       <div id="shuf-card" class="shuf-card"></div>
       <div class="shuf-actions">
         <button type="button" id="shuf-next" class="text-btn">Another</button>
         <button type="button" id="shuf-play" class="jam-join-go">Play this</button>
       </div>
+    </div>
+  </div>
+
+  <div id="queue-picker" class="jam-sheet" hidden>
+    <div class="jam-card" role="dialog" aria-modal="true" aria-label="Add songs to the queue">
+      <h2>Add to the queue</h2>
+      <input id="queue-search" class="queue-search" type="text" placeholder="Search songs or artists" autocomplete="off">
+      <div id="queue-pick-list" class="queue-pick-list"></div>
+      <button type="button" id="queue-done" class="jam-join-go">Done</button>
     </div>
   </div>
 
