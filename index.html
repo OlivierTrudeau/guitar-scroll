@@ -10,11 +10,15 @@
   <script>
     /* Apply a saved light theme before the first paint so it never flashes dark */
     try {
-      if (localStorage.getItem("guitarscroll_theme") === "light") {
-        document.documentElement.dataset.theme = "light";
-        document.querySelector('meta[name="theme-color"]').setAttribute("content", "#faf7f2");
+      var t = localStorage.getItem("guitarscroll_theme");
+      var f = localStorage.getItem("guitarscroll_font");
+      var tc = { light: "#faf7f2", midnight: "#121218" };
+      if (t === "light" || t === "midnight") {
+        document.documentElement.dataset.theme = t;
+        document.querySelector('meta[name="theme-color"]').setAttribute("content", tc[t]);
       }
-    } catch (e) { /* private mode: stay dark */ }
+      if (f === "classic" || f === "songbook") document.documentElement.dataset.font = f;
+    } catch (e) { /* private mode: stay default */ }
   </script>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-180.png">
@@ -36,7 +40,7 @@
       </header>
       <div id="menu-dropdown" class="menu-dropdown hidden">
         <button id="join-jam-btn" class="menu-item">Join a jam</button>
-        <button id="theme-btn" class="menu-item">Light theme</button>
+        <button id="theme-btn" class="menu-item">Appearance</button>
         <button id="export-btn" class="menu-item">Export backup</button>
         <button id="import-btn" class="menu-item">Import backup</button>
         <input id="import-file" type="file" accept=".json" hidden>
@@ -290,6 +294,24 @@
   <div id="toast" class="toast" role="status" aria-live="polite" hidden>
     <span id="toast-text"></span>
     <button type="button" id="toast-action" class="toast-action">Undo</button>
+  </div>
+
+  <div id="look-sheet" class="jam-sheet" hidden>
+    <div class="jam-card look-card" role="dialog" aria-modal="true" aria-labelledby="look-title">
+      <h2 id="look-title">Appearance</h2>
+      <p class="look-label">Color</p>
+      <div class="look-row" id="look-colors" role="radiogroup" aria-label="Color">
+        <button type="button" class="look-opt look-color" role="radio" data-theme-opt="dark"><span class="swatch" style="--s1:#15110e;--s2:#d8a446"></span>Rosewood</button>
+        <button type="button" class="look-opt look-color" role="radio" data-theme-opt="midnight"><span class="swatch" style="--s1:#121218;--s2:#7c6aef"></span>Midnight</button>
+        <button type="button" class="look-opt look-color" role="radio" data-theme-opt="light"><span class="swatch" style="--s1:#faf7f2;--s2:#d8a446"></span>Paper</button>
+      </div>
+      <p class="look-label">Writing</p>
+      <div class="look-row" id="look-fonts" role="radiogroup" aria-label="Writing">
+        <button type="button" class="look-opt look-font" role="radio" data-font-opt="modern" style="--sample:'Hanken Grotesk','Inter',system-ui,sans-serif"><b>Aa</b>Modern</button>
+        <button type="button" class="look-opt look-font" role="radio" data-font-opt="classic" style="--sample:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif"><b>Aa</b>Classic</button>
+        <button type="button" class="look-opt look-font" role="radio" data-font-opt="songbook" style="--sample:'Iowan Old Style','Charter',Georgia,serif"><b>Aa</b>Songbook</button>
+      </div>
+    </div>
   </div>
 
   <div id="jam-sheet" class="jam-sheet" hidden>
