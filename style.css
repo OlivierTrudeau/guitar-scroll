@@ -15,12 +15,53 @@
   --section: var(--text);
   --ok: #67c58a;
   --danger: #e0645a;
+  --accent-ink: var(--accent);               /* brass used as text */
+  --track: var(--surface2);                  /* empty part of a gauge, bar or heatmap */
+  --bar-bg: rgba(21, 17, 14, .94);
+  --float-bg: rgba(30, 25, 21, .9);
+  --placeholder: #7d7266;
+  --shadow: 0 14px 36px rgba(0, 0, 0, .55);
+  color-scheme: dark;
   --radius: 12px;
   --tabbar-h: 58px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --font: 'Hanken Grotesk', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --serif: 'Source Serif 4', 'Iowan Old Style', 'Charter', Georgia, serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, 'DejaVu Sans Mono', monospace;
+}
+
+/* Light: a warm paper white, with brass darkened wherever it is used as text */
+:root[data-theme="light"] {
+  --bg: #faf7f2;
+  --surface: #ffffff;
+  --surface2: #f1ece3;
+  --border: #ddd3c4;
+  --text: #1f1912;
+  --text2: #6b6154;
+  --accent: #d8a446;
+  --accent-dim: #b98a2e;
+  --accent-ink: #8a5c06;
+  --on-accent: #1a1308;
+  --chord: #8a5c06;
+  --ok: #23784a;
+  --danger: #c03a31;
+  --track: #e4dccf;
+  --bar-bg: rgba(250, 247, 242, .94);
+  --float-bg: rgba(255, 255, 255, .92);
+  --placeholder: #8f8478;
+  --shadow: 0 10px 30px rgba(70, 45, 10, .16);
+  color-scheme: light;
+}
+
+/* The iOS home-screen app draws its clock and battery in white over the page,
+   so in the light theme the strip under them stays dark to keep them readable. */
+:root[data-theme="light"] body::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: #15110e;
+  z-index: 200;
 }
 
 html, body {
@@ -56,7 +97,7 @@ html, body {
   left: 0; right: 0; bottom: 0;
   height: calc(var(--tabbar-h) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
-  background: rgba(21, 17, 14, .94);
+  background: var(--bar-bg);
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border-top: 1px solid var(--border);
@@ -90,7 +131,7 @@ html, body {
 #app[data-view="library-view"] ~ .tabbar #tab-songs,
 #app[data-view="stats-view"] ~ .tabbar #calendar-btn,
 #app[data-view="practice-time-view"] ~ .tabbar #calendar-btn,
-#app[data-view="tuner-view"] ~ .tabbar #tuner-btn { color: var(--accent); }
+#app[data-view="tuner-view"] ~ .tabbar #tuner-btn { color: var(--accent-ink); }
 
 /* The tab bar already says where you are, so these two screens need no back arrow */
 #stats-back-btn, #tuner-back-btn { display: none; }
@@ -167,7 +208,7 @@ html, body {
   border-radius: 14px;
   overflow: hidden;
   z-index: 100;
-  box-shadow: 0 14px 36px rgba(0,0,0,.55);
+  box-shadow: var(--shadow);
   min-width: 190px;
 }
 .menu-dropdown.hidden { display: none; }
@@ -233,7 +274,7 @@ html, body {
   background: var(--border);
 }
 .song-row:last-child .song-item::after { display: none; }
-.song-item:active .song-item-title { color: var(--accent); }
+.song-item:active .song-item-title { color: var(--accent-ink); }
 .song-item-info { flex: 1; min-width: 0; }
 .song-item-title {
   font-family: var(--serif);
@@ -268,7 +309,7 @@ html, body {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
+  box-shadow: var(--shadow);
   font-size: 14px;
   font-weight: 500;
 }
@@ -277,7 +318,7 @@ html, body {
   flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--accent);
+  color: var(--accent-ink);
   font: 700 14px var(--font);
   padding: 10px 12px;
   border-radius: 10px;
@@ -358,7 +399,7 @@ html, body {
 }
 .sort-btn:active { background: var(--surface2); }
 .sort-btn.is-open,
-.sort-btn.is-active { border-color: var(--accent); color: var(--accent); }
+.sort-btn.is-active { border-color: var(--accent); color: var(--accent-ink); }
 .sort-btn-icon { display: block; flex-shrink: 0; }
 .sort-btn-caret { display: none; }
 .sort-dropdown {
@@ -371,7 +412,7 @@ html, body {
   border-radius: 14px;
   overflow: hidden;
   z-index: 100;
-  box-shadow: 0 14px 36px rgba(0,0,0,.55);
+  box-shadow: var(--shadow);
 }
 .sort-dropdown.hidden { display: none; }
 .sort-option {
@@ -388,7 +429,7 @@ html, body {
 }
 .sort-option:last-child { border-bottom: none; }
 .sort-option:active { background: var(--border); }
-.sort-option.active { color: var(--accent); font-weight: 700; }
+.sort-option.active { color: var(--accent-ink); font-weight: 700; }
 /* All seven filters share one row, so Unrated is never off-screen */
 .proficiency-filter { display: flex; gap: 6px; }
 .filter-pill {
@@ -434,11 +475,11 @@ html, body {
 }
 .practice-badge { font-size: 12px; color: var(--text2); }
 .song-item-lastplayed { font-size: 12px; color: var(--text2); }
-.song-item-lastplayed.rusty { color: var(--accent); font-weight: 600; }
+.song-item-lastplayed.rusty { color: var(--accent-ink); font-weight: 600; }
 .song-item-lastplayed.never { display: none; }
 .prof-badge { display: inline-flex; align-items: center; gap: 1px; }
 .prof-badge .star { color: var(--border); font-size: 13px; line-height: 1; }
-.prof-badge .star.filled { color: var(--accent); }
+.prof-badge .star.filled { color: var(--accent-ink); }
 .prof-badge.unrated { display: none; }
 
 /* ── Proficiency stars (editor) ── */
@@ -462,7 +503,7 @@ html, body {
   transition: transform .12s;
 }
 .star-btn:active { transform: scale(1.18); }
-.star-btn.active { color: var(--accent); }
+.star-btn.active { color: var(--accent-ink); }
 .proficiency-label { font-size: 14px; color: var(--text2); font-weight: 500; }
 
 /* ── Edit Form ── */
@@ -489,7 +530,7 @@ html, body {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(216, 164, 70, .16);
 }
-.edit-form input::placeholder, .edit-form textarea::placeholder { color: #7d7266; }
+.edit-form input::placeholder, .edit-form textarea::placeholder { color: var(--placeholder); }
 .edit-form textarea {
   flex: 1;
   min-height: 260px;
@@ -589,8 +630,8 @@ html, body {
   font-weight: 600;
 }
 .meta-tag strong { color: var(--text2); font-weight: 500; margin-right: 3px; }
-.meta-tag.rusty { border-color: var(--accent-dim); color: var(--accent); }
-.meta-tag.rusty strong { color: var(--accent); opacity: .8; }
+.meta-tag.rusty { border-color: var(--accent-dim); color: var(--accent-ink); }
+.meta-tag.rusty strong { color: var(--accent-ink); opacity: .8; }
 
 .song-content {
   flex: 1;
@@ -676,12 +717,12 @@ html, body {
   align-items: center;
   gap: 4px;
   padding: 6px 18px 6px 6px;
-  background: rgba(30, 25, 21, .9);
+  background: var(--float-bg);
   -webkit-backdrop-filter: blur(16px);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border);
   border-radius: 999px;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
+  box-shadow: var(--shadow);
 }
 .ctrl-btn {
   width: 46px;
@@ -760,7 +801,7 @@ html, body {
 .dial-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .dial-arc {
   fill: none;
-  stroke: var(--surface2);
+  stroke: var(--track);
   stroke-width: 13;
   stroke-linecap: round;
   transition: stroke .2s;
@@ -831,7 +872,7 @@ html, body {
   color: var(--text2);
   font-variant-numeric: tabular-nums;
 }
-.tuner-cents.flat, .tuner-cents.sharp { color: var(--accent); }
+.tuner-cents.flat, .tuner-cents.sharp { color: var(--accent-ink); }
 .tuner-cents.in-tune { color: var(--ok); }
 .tuner-freq {
   font-size: 13px;
@@ -846,7 +887,7 @@ html, body {
   color: var(--text2);
   min-height: 20px;
 }
-.tuner-status.flat, .tuner-status.sharp { color: var(--accent); }
+.tuner-status.flat, .tuner-status.sharp { color: var(--accent-ink); }
 .tuner-status.in-tune { color: var(--ok); }
 
 .tuner-strings { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: auto; }
@@ -882,7 +923,7 @@ html, body {
 /* Pinned by the player: the tuner ignores every other string until untapped */
 .tuner-string.pinned { box-shadow: 0 0 0 2px var(--accent); }
 .tuner-hint { font-size: 13px; color: var(--text2); text-align: center; margin-top: -4px; }
-.tuner-hint.pinned { color: var(--accent); }
+.tuner-hint.pinned { color: var(--accent-ink); }
 
 .tuner-start-btn {
   width: 100%;
@@ -903,7 +944,7 @@ html, body {
   width: 140px;
   height: 4px;
   border-radius: 2px;
-  background: var(--surface2);
+  background: var(--track);
   overflow: hidden;
   margin-top: -4px;
 }
@@ -944,7 +985,7 @@ html, body {
   line-height: 1;
 }
 .stats-card-label { font-size: 13px; color: var(--text2); font-weight: 500; }
-.stats-card-sub { font-size: 12px; color: var(--accent); font-weight: 600; }
+.stats-card-sub { font-size: 12px; color: var(--accent-ink); font-weight: 600; }
 .stats-heading { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 14px; }
 
 /* ── Practice calendar heatmap ── */
@@ -959,9 +1000,9 @@ html, body {
   scrollbar-width: none;
 }
 .calendar::-webkit-scrollbar { display: none; }
-.cal-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--surface2); }
+.cal-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--track); }
 /* Intensity levels — brighter = practiced */
-.cal-cell.lvl-0 { background: var(--surface2); }
+.cal-cell.lvl-0 { background: var(--track); }
 .cal-cell.lvl-1 { background: rgba(216, 164, 70, 0.35); }
 .cal-cell.lvl-2 { background: rgba(216, 164, 70, 0.65); }
 .cal-cell.lvl-3 { background: var(--accent); }
@@ -982,7 +1023,7 @@ html, body {
   line-height: 1;
   color: var(--text2);
 }
-.stats-card-btn:active .stats-num { color: var(--accent); }
+.stats-card-btn:active .stats-num { color: var(--accent-ink); }
 .practice-total { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 0 4px; }
 .practice-total-num {
   font-family: var(--serif);
@@ -1048,8 +1089,8 @@ html, body {
 }
 .practice-period-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .practice-period-label { font-size: 15px; font-weight: 700; }
-.practice-period-time { font-size: 15px; font-weight: 700; color: var(--accent); }
-.practice-bar { display: block; height: 5px; border-radius: 3px; background: var(--bg); overflow: hidden; }
+.practice-period-time { font-size: 15px; font-weight: 700; color: var(--accent-ink); }
+.practice-bar { display: block; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
 .practice-bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent); min-width: 0; }
 .practice-period-meta { font-size: 12px; color: var(--text2); }
 .practice-songs { border-top: 1px solid var(--border); padding: 6px 16px 10px; }
@@ -1072,7 +1113,7 @@ html, body {
   padding: 1px 5px;
   margin-left: 6px;
 }
-.practice-song-time { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.practice-song-time { color: var(--accent-ink); font-weight: 600; flex-shrink: 0; }
 .practice-songs-empty { font-size: 13px; color: var(--text2); padding: 6px 0; }
 .practice-note { font-size: 12px; color: var(--text2); line-height: 1.5; margin-top: 16px; }
 
@@ -1314,7 +1355,7 @@ html, body {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 .jam-nearby-title {
   font-size: 15px;
@@ -1380,7 +1421,7 @@ html, body {
 .host-lib-now {
   grid-row: 1 / span 2;
   grid-column: 2;
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 12px;
   font-weight: 700;
 }

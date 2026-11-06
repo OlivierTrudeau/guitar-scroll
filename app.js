@@ -3466,6 +3466,29 @@
     e.preventDefault();
     joinJam(jamCodeInput.value);
   });
+  // ── Light / dark theme ──
+  const THEME_KEY = "guitarscroll_theme";
+  const themeBtn = $("#theme-btn");
+
+  function applyTheme(theme) {
+    const light = theme === "light";
+    document.documentElement.dataset.theme = light ? "light" : "dark";
+    themeBtn.textContent = light ? "Dark theme" : "Light theme";
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", light ? "#faf7f2" : "#15110e");
+  }
+
+  let savedTheme = "dark";
+  try { savedTheme = localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { /* private mode */ }
+  applyTheme(savedTheme);
+
+  themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
+    menuDropdown.classList.add("hidden");
+  });
+
   joinJamBtn.addEventListener("click", () => {
     menuDropdown.classList.add("hidden");
     openJoinSheet("");

@@ -7,6 +7,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#15110e">
   <title>GuitarScroll</title>
+  <script>
+    /* Apply a saved light theme before the first paint so it never flashes dark */
+    try {
+      if (localStorage.getItem("guitarscroll_theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+        document.querySelector('meta[name="theme-color"]').setAttribute("content", "#faf7f2");
+      }
+    } catch (e) { /* private mode: stay dark */ }
+  </script>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="icon" href="icon-192.png" type="image/png">
@@ -27,6 +36,7 @@
       </header>
       <div id="menu-dropdown" class="menu-dropdown hidden">
         <button id="join-jam-btn" class="menu-item">Join a jam</button>
+        <button id="theme-btn" class="menu-item">Light theme</button>
         <button id="export-btn" class="menu-item">Export backup</button>
         <button id="import-btn" class="menu-item">Import backup</button>
         <input id="import-file" type="file" accept=".json" hidden>
