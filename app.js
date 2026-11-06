@@ -481,7 +481,7 @@
     closeChordCard();
     stopScroll();
     // Leaving the player stops the practice clock and banks whatever it counted
-    if (view !== playerView) stopPracticeClock();
+    if (view !== playerView) { stopPracticeClock(); endShuffleRun(); }
     // Leaving the tuner view should always release the mic
     if (view !== tunerView) stopTuner();
   }
@@ -1564,6 +1564,7 @@
     if (jamIsFollow() || followRev) return;
     scrolling = true;
     paintTransport(true);
+    hideNextUp();
 
     // Track autoscroll starts — shows people are playing along, not just browsing
     if (window.Analytics) {
@@ -1598,6 +1599,7 @@
       const maxScroll = songContent.scrollHeight - songContent.clientHeight;
       if (songContent.scrollTop >= maxScroll) {
         stopScroll();
+        onScrollReachedEnd();
         return;
       }
       scrollRAF = requestAnimationFrame(tick);
@@ -2864,21 +2866,91 @@
   });
   shufNext.addEventListener("click", () => {
     if (shufOrder.length < 2) return;
+    advanceShuffle();
+    paintShuffle();
+  });
+  // Step to the next suggestion; once every song was shown, draw a fresh order
+  // that doesn't open with the song just seen.
+  function advanceShuffle() {
     shufIdx++;
     if (shufIdx >= shufOrder.length) {
-      // Everything was shown: draw a fresh order, but never open with the song just seen
       const last = shufOrder[shufOrder.length - 1];
       buildShuffle();
       if (shufOrder.length > 1 && shufOrder[0] === last) shufOrder.push(shufOrder.shift());
     }
-    paintShuffle();
-  });
+  }
+
   shufPlay.addEventListener("click", () => {
     const id = shufOrder[shufIdx];
     if (!id) return;
     shufSheet.hidden = true;
     openPlayer(id);
+    shufRunning = true; // set after openPlayer, which clears any earlier run
   });
+
+  // ── Shuffle run: after a picked song ends, offer the next one ──
+  // The scroller reaching the bottom doesn't mean the song is over (the last
+  // lines are often still being played), so the next song is offered with a
+  // countdown instead of being switched to at once. Touching the chart, or the
+  // card, stops the countdown; "Play now" goes immediately.
+  const NEXT_UP_MS = 20000;
+  const nextUp = $("#next-up");
+  let shufRunning = false;
+  let nextUpTimer = 0;
+
+  function hideNextUp() {
+    clearTimeout(nextUpTimer);
+    nextUpTimer = 0;
+    nextUp.classList.remove("counting");
+    nextUp.hidden = true;
+  }
+  function endShuffleRun() {
+    shufRunning = false;
+    hideNextUp();
+  }
+  function playNextUp() {
+    const id = shufOrder[shufIdx];
+    hideNextUp();
+    if (!id) { endShuffleRun(); return; }
+    openPlayer(id);
+    shufRunning = true;
+  }
+  function paintNextUp() {
+    const song = songs.find((s) => s.id === shufOrder[shufIdx]);
+    if (!song) { endShuffleRun(); return; }
+    $("#next-up-title").textContent = song.title || "Untitled";
+    $("#next-up-artist").textContent = song.artist || "";
+  }
+  function startNextUpCountdown() {
+    clearTimeout(nextUpTimer);
+    nextUp.classList.remove("counting");
+    void nextUp.offsetWidth; // restart the bar's animation
+    nextUp.style.setProperty("--count-ms", NEXT_UP_MS + "ms");
+    nextUp.classList.add("counting");
+    nextUpTimer = setTimeout(playNextUp, NEXT_UP_MS);
+  }
+  function stopNextUpCountdown() {
+    clearTimeout(nextUpTimer);
+    nextUpTimer = 0;
+    nextUp.classList.remove("counting");
+    $("#next-up-fill").style.transform = "scaleX(0)";
+  }
+  function onScrollReachedEnd() {
+    if (!shufRunning || jamIsFollow() || followRev || shufOrder.length < 2) return;
+    // The song just finished is shufOrder[shufIdx]; suggest the one after it
+    advanceShuffle();
+    paintNextUp();
+    $("#next-up-fill").style.transform = "";
+    nextUp.hidden = false;
+    hideToast();
+    closeChordCard();
+    startNextUpCountdown();
+  }
+  $("#next-up-go").addEventListener("click", playNextUp);
+  $("#next-up-skip").addEventListener("click", () => { advanceShuffle(); paintNextUp(); $("#next-up-fill").style.transform = ""; startNextUpCountdown(); });
+  $("#next-up-stop").addEventListener("click", endShuffleRun);
+  // Still playing the last lines: touching the chart holds the countdown
+  songContent.addEventListener("pointerdown", () => { if (!nextUp.hidden && nextUpTimer) stopNextUpCountdown(); });
 
   // ── Edge swipe: go back ──
   // Drag in from either screen edge to return to the previous screen, with the
@@ -2919,20 +2991,50 @@
       s.view.style.transition = "none";
     }
     e.preventDefault(); // keeps the browser's own back gesture out of it
+    const now = performance.now();
+    if (s.lastT) s.vel = (dx - s.dx) / Math.max(1, now - s.lastT); // px per ms
+    s.lastT = now;
     s.dx = Math.max(0, dx);
-    s.view.style.transform = "translateX(" + s.dx * s.dir * 0.55 + "px)";
-    s.view.style.opacity = String(1 - Math.min(0.4, s.dx / 600));
+    s.view.style.transform = "translateX(" + s.dx * s.dir + "px)";
+    s.view.style.opacity = String(1 - Math.min(0.5, s.dx / (window.innerWidth * 1.2)));
   }, { passive: false });
 
   function endEdgeSwipe() {
     const s = edgeSwipe;
     edgeSwipe = null;
     if (!s || !s.active) return;
-    const go = s.dx >= BACK_DISTANCE;
-    s.view.style.transition = "";
-    s.view.style.transform = "";
-    s.view.style.opacity = "";
-    if (go) document.querySelector(s.sel).click();
+    const view = s.view;
+    const go = s.dx >= BACK_DISTANCE || (s.vel > 0.6 && s.dx > 30);
+    if (!go) {
+      view.style.transition = "";
+      view.style.transform = "";
+      view.style.opacity = "";
+      return;
+    }
+    // Carry on from where the finger left off, all the way off the screen in one
+    // motion, and only then change screen.
+    const W = window.innerWidth;
+    const remaining = Math.max(0, W - s.dx);
+    const ms = Math.round(Math.min(260, Math.max(120, remaining / Math.max(0.9, s.vel || 0, 1.4))));
+    view.style.transition = "transform " + ms + "ms cubic-bezier(.2,.7,.3,1), opacity " + ms + "ms ease-out";
+    view.style.transform = "translateX(" + W * s.dir + "px)";
+    view.style.opacity = "0";
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      view.removeEventListener("transitionend", onEnd);
+      const sel = s.sel;
+      document.querySelector(sel).click(); // the new screen takes over (the old one is now inactive and invisible)
+      view.style.transition = "none";
+      view.style.transform = "";
+      view.style.opacity = "";
+      void view.offsetWidth;
+      view.style.transition = "";
+    };
+    const onEnd = (ev) => { if (ev.target === view && ev.propertyName === "transform") finish(); };
+    view.addEventListener("transitionend", onEnd);
+    setTimeout(finish, ms + 60);
   }
   document.addEventListener("touchend", endEdgeSwipe);
   document.addEventListener("touchcancel", () => {
