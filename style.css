@@ -195,16 +195,44 @@ html, body {
   touch-action: pan-y;
   overscroll-behavior: contain;
 }
+.song-row { position: relative; overflow: hidden; }
+.song-row-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 24px;
+  background: #7a3a34;
+  color: #fff;
+  font: 700 15px var(--font);
+  opacity: 0;
+  transition: background .15s;
+}
+.song-row.swiping .song-row-bg { opacity: 1; }
+.song-row.armed .song-row-bg { background: var(--danger); color: #1c0b09; }
 .song-item {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin: 0 20px;
-  padding: 15px 0 14px;
+  padding: 15px 20px 14px;
+  background: var(--bg);
   cursor: pointer;
-  border-bottom: 1px solid var(--border);
+  touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
-.song-item:last-child { border-bottom: none; }
+/* Hairline between songs, inset to line up with the text */
+.song-item::after {
+  content: "";
+  position: absolute;
+  left: 20px; right: 20px; bottom: 0;
+  height: 1px;
+  background: var(--border);
+}
+.song-row:last-child .song-item::after { display: none; }
 .song-item:active .song-item-title { color: var(--accent); }
 .song-item-info { flex: 1; min-width: 0; }
 .song-item-title {
@@ -225,18 +253,49 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.song-item-delete {
+
+/* Undo bar */
+.toast {
+  position: fixed;
+  left: 16px; right: 16px;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 12px);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .55);
+  font-size: 14px;
+  font-weight: 500;
+}
+.toast span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toast-action {
+  flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--text2);
-  padding: 6px;
-  margin: -2px -6px 0 0;
-  cursor: pointer;
+  color: var(--accent);
+  font: 700 14px var(--font);
+  padding: 10px 12px;
   border-radius: 10px;
-  opacity: .45;
-  display: inline-flex;
+  cursor: pointer;
 }
-.song-item-delete:active { opacity: 1; color: var(--danger); }
+.toast-action:active { background: var(--border); }
+
+.delete-song-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--danger);
+  font: 600 15px var(--font);
+  padding: 13px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.delete-song-btn:active { background: var(--surface); }
 
 .empty-state {
   flex: 1;
