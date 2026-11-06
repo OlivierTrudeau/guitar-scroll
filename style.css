@@ -75,6 +75,31 @@
 }
 :root[data-theme="midnight"] body::before { content: none; }
 
+/* Ember: for the dark hours. Near-black, no blue light, and every tone pulled
+   down so nothing on screen glares; text is a dim warm amber. */
+:root[data-theme="ember"] {
+  --bg: #0b0706;
+  --surface: #130d0b;
+  --surface2: #1c1310;
+  --border: #2a1c17;
+  --text: #c49a7c;
+  --text2: #8f6f5b;
+  --accent: #a8693a;
+  --accent-dim: #854f27;
+  --accent-ink: #c0834a;
+  --on-accent: #120a05;
+  --chord: #c78f4e;
+  --section: var(--text);
+  --ok: #5e9a72;
+  --danger: #b25a50;
+  --track: #1c1310;
+  --bar-bg: rgba(11, 7, 6, .95);
+  --float-bg: rgba(19, 13, 11, .93);
+  --placeholder: #5e463a;
+  --shadow: 0 14px 36px rgba(0, 0, 0, .7);
+}
+:root[data-theme="ember"] body::before { content: none; }
+
 /* Writing: Modern is the default above. Classic is the app's original system
    fonts; Songbook sets everything in a book serif with a typewriter chart. */
 :root[data-font="classic"] {
@@ -92,6 +117,8 @@
 .look-label { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); margin: 14px 0 8px; }
 .look-label:first-of-type { margin-top: 6px; }
 .look-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+#look-colors { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+#look-colors .look-opt { padding: 12px 2px; font-size: 12.5px; }
 .look-opt {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 12px 6px; border-radius: 14px; border: 1.5px solid var(--border);

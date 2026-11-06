@@ -3705,7 +3705,7 @@
   const themeBtn = $("#theme-btn");
 
   const FONT_KEY = "guitarscroll_font";
-  const THEME_COLORS = { dark: "#15110e", midnight: "#121218", light: "#faf7f2" };
+  const THEME_COLORS = { dark: "#15110e", midnight: "#121218", ember: "#0b0706", light: "#faf7f2" };
   const lookSheet = $("#look-sheet");
 
   function applyTheme(theme) {

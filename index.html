@@ -12,8 +12,8 @@
     try {
       var t = localStorage.getItem("guitarscroll_theme");
       var f = localStorage.getItem("guitarscroll_font");
-      var tc = { light: "#faf7f2", midnight: "#121218" };
-      if (t === "light" || t === "midnight") {
+      var tc = { light: "#faf7f2", midnight: "#121218", ember: "#0b0706" };
+      if (t === "light" || t === "midnight" || t === "ember") {
         document.documentElement.dataset.theme = t;
         document.querySelector('meta[name="theme-color"]').setAttribute("content", tc[t]);
       }
@@ -303,6 +303,7 @@
       <div class="look-row" id="look-colors" role="radiogroup" aria-label="Color">
         <button type="button" class="look-opt look-color" role="radio" data-theme-opt="dark"><span class="swatch" style="--s1:#15110e;--s2:#d8a446"></span>Rosewood</button>
         <button type="button" class="look-opt look-color" role="radio" data-theme-opt="midnight"><span class="swatch" style="--s1:#121218;--s2:#7c6aef"></span>Midnight</button>
+        <button type="button" class="look-opt look-color" role="radio" data-theme-opt="ember"><span class="swatch" style="--s1:#0b0706;--s2:#a8693a"></span>Ember</button>
         <button type="button" class="look-opt look-color" role="radio" data-theme-opt="light"><span class="swatch" style="--s1:#faf7f2;--s2:#d8a446"></span>Paper</button>
       </div>
       <p class="look-label">Writing</p>
