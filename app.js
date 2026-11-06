@@ -12,6 +12,10 @@
   // ── DOM refs ──
   const $ = (s) => document.querySelector(s);
   const appEl = document.getElementById("app");
+  const toastEl = $("#toast");
+  const toastText = $("#toast-text");
+  const toastAction = $("#toast-action");
+  const deleteSongBtn = $("#delete-song-btn");
   const libraryView = $("#library-view");
   const editView = $("#edit-view");
   const playerView = $("#player-view");
@@ -514,32 +518,120 @@
     }
 
     filtered.forEach((song) => {
-      const el = document.createElement("div");
-      el.className = "song-item";
-      el.innerHTML = `
-        <div class="song-item-info">
-          <div class="song-item-title">${esc(song.title || "Untitled")}</div>
-          <div class="song-item-artist">${esc(song.artist || "")}</div>
-          <div class="song-item-meta-row">
-            ${lastPlayedBadge(song.lastPlayed)}
-            ${practiceCountBadge(song.practiceCount)}
+      const row = document.createElement("div");
+      row.className = "song-row";
+      row.innerHTML = `
+        <div class="song-row-bg" aria-hidden="true"><span>Delete</span></div>
+        <div class="song-item">
+          <div class="song-item-info">
+            <div class="song-item-title">${esc(song.title || "Untitled")}</div>
+            <div class="song-item-artist">${esc(song.artist || "")}</div>
+            <div class="song-item-meta-row">
+              ${lastPlayedBadge(song.lastPlayed)}
+              ${practiceCountBadge(song.practiceCount)}
+            </div>
           </div>
-        </div>
-        <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
-        <button class="song-item-delete" data-id="${song.id}" aria-label="Delete ${esc(song.title || "song")}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>`;
-      el.querySelector(".song-item-info").addEventListener("click", () => openPlayer(song.id));
-      el.querySelector(".song-item-delete").addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (confirm(`Delete "${song.title}"?`)) {
-          rememberDeletedSong(song.id);
-          archiveSongPractice(song);
-          songs = songs.filter((s) => s.id !== song.id);
-          saveSongs();
-          renderLibrary();
-        }
+          <div class="song-item-prof">${proficiencyStars(song.proficiency)}</div>
+        </div>`;
+      const item = row.querySelector(".song-item");
+      item.addEventListener("click", () => {
+        // A swipe that ends over a row is not a tap on it
+        if (Date.now() < swipeClickBlockedUntil) return;
+        openPlayer(song.id);
       });
-      songListEl.appendChild(el);
+      attachSwipeToDelete(row, item, () => deleteSongWithUndo(song));
+      songListEl.appendChild(row);
     });
+  }
+
+  // ── Swipe a song left to delete it (with Undo) ──
+  let swipeClickBlockedUntil = 0;
+
+  function attachSwipeToDelete(row, item, onDelete) {
+    const THRESHOLD = 96;
+    let startX = 0, startY = 0, dx = 0, pointerId = null, tracking = false, swiping = false;
+
+    item.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      startX = e.clientX; startY = e.clientY; dx = 0;
+      pointerId = e.pointerId; tracking = true; swiping = false;
+    });
+
+    item.addEventListener("pointermove", (e) => {
+      if (!tracking || e.pointerId !== pointerId) return;
+      const mx = e.clientX - startX;
+      const my = e.clientY - startY;
+      if (!swiping) {
+        // Scrolling the list wins until the finger has clearly gone sideways
+        if (Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) { tracking = false; return; }
+        if (Math.abs(mx) <= 10 || Math.abs(mx) <= Math.abs(my)) return;
+        swiping = true;
+        row.classList.add("swiping");
+        try { item.setPointerCapture(pointerId); } catch (err) { /* pointer already gone */ }
+      }
+      dx = Math.min(0, mx);
+      item.style.transition = "none";
+      item.style.transform = `translateX(${dx}px)`;
+      row.classList.toggle("armed", dx < -THRESHOLD);
+    });
+
+    const finish = (e, cancelled) => {
+      if (!tracking || (e && e.pointerId !== pointerId)) return;
+      tracking = false;
+      if (!swiping) return;
+      swipeClickBlockedUntil = Date.now() + 350;
+      item.style.transition = "transform .2s ease";
+      // A gesture the system took over (cancelled) never counts as a delete
+      if (!cancelled && dx < -THRESHOLD) {
+        item.style.transform = "translateX(-100%)";
+        setTimeout(onDelete, 190);
+      } else {
+        item.style.transform = "";
+        setTimeout(() => row.classList.remove("swiping", "armed"), 200);
+      }
+    };
+    item.addEventListener("pointerup", (e) => finish(e, false));
+    item.addEventListener("pointercancel", (e) => finish(e, true));
+  }
+
+  // Delete now, but keep a snapshot so Undo can put the song, its practice
+  // history and its "deleted" marker back exactly as they were.
+  let undoTimer = null;
+  function deleteSongWithUndo(song) {
+    const snapshot = {
+      songs: songs.slice(),
+      archive: JSON.parse(JSON.stringify(practiceArchive)),
+      deleted: new Set(deletedSongIds),
+    };
+    rememberDeletedSong(song.id);
+    archiveSongPractice(song);
+    songs = songs.filter((s) => s.id !== song.id);
+    saveSongs();
+    renderLibrary();
+    showToast(`Deleted \u201c${song.title || "Untitled"}\u201d`, "Undo", () => {
+      songs = snapshot.songs;
+      practiceArchive = snapshot.archive;
+      deletedSongIds = snapshot.deleted;
+      saveSongs();
+      savePracticeArchive();
+      saveDeletedSongIds();
+      renderLibrary();
+    });
+  }
+
+  function showToast(text, actionLabel, onAction) {
+    clearTimeout(undoTimer);
+    toastText.textContent = text;
+    toastAction.textContent = actionLabel;
+    toastAction.hidden = !onAction;
+    toastAction.onclick = () => { hideToast(); if (onAction) onAction(); };
+    toastEl.hidden = false;
+    undoTimer = setTimeout(hideToast, 6000);
+  }
+
+  function hideToast() {
+    clearTimeout(undoTimer);
+    toastEl.hidden = true;
   }
 
   // ── Proficiency stars (editor) ──
@@ -991,6 +1083,7 @@
     bodyInput.value = song ? song.body : "";
     editingProficiency = song ? (song.proficiency || 0) : 0;
     updateEditorStars();
+    deleteSongBtn.hidden = !song;
     ugUrlInput.value = "";
     setUgLoading(false);
     setUgStatus("", null);
@@ -3231,6 +3324,13 @@
   $("#tab-songs").addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   editBackBtn.addEventListener("click", () => { showView(libraryView); renderLibrary(); });
   saveSongBtn.addEventListener("click", saveSong);
+  deleteSongBtn.addEventListener("click", () => {
+    const song = songs.find((s) => s.id === editingId);
+    if (!song) return;
+    if (currentSongId === song.id) currentSongId = null;
+    showView(libraryView);
+    deleteSongWithUndo(song);
+  });
   ugImportBtn.addEventListener("click", handleUgImport);
   ugUrlInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

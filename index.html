@@ -114,6 +114,7 @@
           <span id="proficiency-label" class="proficiency-label">Not rated</span>
         </div>
         <textarea id="song-body-input" placeholder="Paste chords & lyrics here — or import from an Ultimate Guitar link above.&#10;&#10;Supports formats like:&#10;&#10;[Verse 1]&#10;C              Am&#10;Heart on my sleeve&#10;&#10;Or inline: [C]Heart on my [Am]sleeve"></textarea>
+        <button type="button" id="delete-song-btn" class="delete-song-btn" hidden>Delete song</button>
       </div>
     </div>
 
@@ -254,6 +255,11 @@
       <span>Tuner</span>
     </button>
   </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button type="button" id="toast-action" class="toast-action">Undo</button>
+  </div>
 
   <div id="jam-sheet" class="jam-sheet" hidden>
     <div class="jam-card" role="dialog" aria-modal="true" aria-labelledby="jam-sheet-title">
