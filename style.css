@@ -729,6 +729,15 @@ html, body {
 .text-size-val { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text); min-width: 40px; text-align: center; }
 .text-pop-opt { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--text2); }
 .text-pop-opt input { accent-color: var(--accent); width: 18px; height: 18px; }
+.pace-opt { align-items: flex-start; }
+.pace-opt input { margin-top: 0; flex-shrink: 0; }
+.pace-opt small { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.3; opacity: .78; max-width: 190px; }
+.text-pop-link {
+  display: block; margin: 6px 0 0 26px; padding: 4px 0;
+  border: 0; background: none; color: var(--accent-ink);
+  font: 600 12.5px var(--font); cursor: pointer;
+}
+.text-pop-link:disabled { color: var(--text2); opacity: .45; cursor: default; }
 
 .song-meta {
   display: flex;
@@ -810,6 +819,8 @@ html, body {
 }
 .line-lyric { color: var(--text); }
 .line-empty { display: block; height: 14px; }
+/* Extra blank lines: not drawn, only measured by Auto pace */
+.pace-hint { display: block; height: 0; overflow: hidden; }
 .song-content > .line-section:first-child { margin-top: 4px; }
 .strum-pattern {
   display: block;
@@ -870,6 +881,19 @@ html, body {
   min-width: 46px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  position: relative;
+}
+/* Auto pace is bending this song's speed: a quiet brass dot, no animation */
+.speed-label.is-paced::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: -8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: .85;
 }
 
 /* ── Tuner ── */

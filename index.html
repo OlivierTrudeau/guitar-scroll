@@ -151,6 +151,8 @@
           <span id="text-size-val" class="text-size-val">13.5</span>
           <button id="text-larger" class="text-step" type="button" aria-label="Larger text"><span style="font-size:21px">A</span></button>
         </div>
+        <label class="text-pop-opt pace-opt"><input type="checkbox" id="autopace-toggle" checked><span>Auto pace<small>Learns from your swipes, pauses and blank lines</small></span></label>
+        <button type="button" id="pace-reset" class="text-pop-link" disabled>Reset learned pacing</button>
       </div>
       <div id="song-meta" class="song-meta"></div>
       <div id="jam-banner" class="jam-banner" hidden>
@@ -437,6 +439,7 @@
   <script src="analytics.js"></script>
   <script src="pitch.js"></script>
   <script src="chords.js"></script>
+  <script src="pace.js"></script>
   <script src="qr.js"></script>
   <script src="offline.js"></script>
   <script src="jam.js"></script>

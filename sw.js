@@ -1,4 +1,4 @@
-const CACHE_NAME = "guitarscroll-v55";
+const CACHE_NAME = "guitarscroll-v56";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./offline.js",
   "./pitch.js",
   "./chords.js",
+  "./pace.js",
   "./analytics.js",
   "./manifest.json",
   "./icon-180.png",
