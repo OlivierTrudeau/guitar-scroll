@@ -1664,3 +1664,23 @@ html, body {
 .queue-pick .sq-text b { font-size: 16px; }
 .queue-pick .qp-state { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--on-accent); font-weight: 700; font-size: 15px; }
 .queue-pick.on .qp-state { background: var(--accent); border-color: var(--accent); }
+
+/* ── Offline jam pairing ── */
+.jam-offline-link { display: block; margin: 14px auto 0; background: none; border: 0; color: var(--accent-ink); font: 600 13.5px var(--font); padding: 8px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.jam-offline-btn { display: block; width: 100%; margin-top: 12px; background: var(--accent); color: var(--on-accent); border: 0; border-radius: 12px; padding: 14px; font: 700 16px var(--font); cursor: pointer; }
+.jam-offline-btn[hidden], .jam-offline-link[hidden] { display: none; }
+.pair-sheet { position: fixed; inset: 0; z-index: 300; background: var(--bg); display: flex; justify-content: center; overflow-y: auto; }
+.pair-sheet[hidden] { display: none !important; }
+.pair-card { width: min(480px, 100%); padding: max(14px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+.pair-head { display: flex; align-items: center; justify-content: space-between; }
+.pair-head h2 { font: 600 26px/1.15 var(--serif); }
+.pair-qr-box { background: #fff; border-radius: 16px; padding: 10px; margin: 6px auto 12px; width: min(100%, 360px); }
+.pair-qr-box canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.pair-cam-box { position: relative; margin: 6px auto 12px; width: min(100%, 360px); aspect-ratio: 1; border-radius: 16px; overflow: hidden; background: #000; }
+.pair-cam-box video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pair-frame { position: absolute; inset: 14%; border: 3px solid var(--accent); border-radius: 14px; box-shadow: 0 0 0 999px rgba(0,0,0,.35); pointer-events: none; }
+.pair-paste-box { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; }
+.pair-paste-box textarea { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font: 13px var(--mono); padding: 10px 12px; resize: none; }
+.pair-actions { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; }
+.pair-actions .jam-join-go { flex: 1; margin: 0; }
+.pair-actions .text-btn[hidden], .pair-actions .jam-join-go[hidden] { display: none; }

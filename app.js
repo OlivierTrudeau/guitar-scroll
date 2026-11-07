@@ -160,6 +160,8 @@
   let activeSort = "default";
   let searchQuery = "";
   let jamSession = null;
+  let jamTransport = null; // set for an offline jam: { hub } for the host, { link } for a follower
+  let jamOffline = false;
   let jamCode = "";
   let jamLinkStatus = "idle";
   let jamPeerCount = 0;
@@ -3141,6 +3143,282 @@
     if (s && s.active) { s.view.style.transition = ""; s.view.style.transform = ""; s.view.style.opacity = ""; }
   });
 
+
+  // ── Offline jam pairing ──
+  // Host: show a QR, then scan the reply. Joiner: scan the QR, then show a
+  // reply. See offline.js for what the codes carry and why.
+  const pairSheet = $("#pair-sheet");
+  const pairTitle = $("#pair-title");
+  const pairLead = $("#pair-lead");
+  const pairQrBox = $("#pair-qr-box");
+  const pairCamBox = $("#pair-cam-box");
+  const pairVideo = $("#pair-video");
+  const pairPasteBox = $("#pair-paste-box");
+  const pairStatus = $("#pair-status");
+  const pairMain = $("#pair-main");
+  const pairAlt = $("#pair-alt");
+  let pairRole = ""; // "host" | "guest"
+  let pairInvite = null; // host: the pending invite
+  let pairStream = null;
+  let pairScanTimer = 0;
+  let pairBusy = false;
+  let pairGen = 0;
+
+  function pairShow(opts) {
+    pairTitle.textContent = opts.title || "";
+    pairLead.textContent = opts.lead || "";
+    pairQrBox.hidden = !opts.qr;
+    pairCamBox.hidden = !opts.cam;
+    pairPasteBox.hidden = !opts.paste;
+    pairStatus.textContent = opts.status || "";
+    pairMain.hidden = !opts.main;
+    pairMain.textContent = opts.main ? opts.main.label : "";
+    pairMain.onclick = opts.main ? opts.main.run : null;
+    pairAlt.hidden = !opts.alt;
+    pairAlt.textContent = opts.alt ? opts.alt.label : "";
+    pairAlt.onclick = opts.alt ? opts.alt.run : null;
+    if (opts.qr) {
+      const qr = QR.encode(opts.qr, { ecc: "M" });
+      QR.draw($("#pair-qr"), qr, 8);
+    }
+  }
+
+  function stopPairCamera() {
+    clearTimeout(pairScanTimer);
+    pairScanTimer = 0;
+    if (pairStream) pairStream.getTracks().forEach((t) => t.stop());
+    pairStream = null;
+    try { pairVideo.srcObject = null; } catch (e) { /* gone */ }
+  }
+
+  function closePair() {
+    pairGen++;
+    stopPairCamera();
+    if (pairInvite) { try { pairInvite.cancel(); } catch (e) { /* done */ } pairInvite = null; }
+    pairSheet.hidden = true;
+    pairBusy = false;
+  }
+
+  // Calls onText once with the first QR code the camera reads
+  async function startPairScan(onText, fallback) {
+    stopPairCamera();
+    const gen = pairGen;
+    try {
+      pairStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+        audio: false,
+      });
+    } catch (e) {
+      if (gen === pairGen) fallback("Can't use the camera here. Paste the code instead.");
+      return;
+    }
+    if (gen !== pairGen) { stopPairCamera(); return; }
+    pairVideo.srcObject = pairStream;
+    try { await pairVideo.play(); } catch (e) { /* autoplay quirks: frames still arrive */ }
+    let detector = null;
+    if ("BarcodeDetector" in window) {
+      try { detector = new BarcodeDetector({ formats: ["qr_code"] }); } catch (e) { detector = null; }
+    }
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let n = 0;
+    const step = async () => {
+      if (gen !== pairGen || !pairStream) return;
+      let text = null;
+      const vw = pairVideo.videoWidth;
+      const vh = pairVideo.videoHeight;
+      if (vw && vh) {
+        if (detector) {
+          try {
+            const found = await detector.detect(pairVideo);
+            if (found.length) text = found[0].rawValue;
+          } catch (e) { detector = null; }
+        }
+        if (text === null && !detector) {
+          const w = n++ % 3 === 2 ? Math.min(1000, vw) : Math.min(640, vw);
+          const h = Math.round(w * vh / vw);
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(pairVideo, 0, 0, w, h);
+          const px = ctx.getImageData(0, 0, w, h).data;
+          const gray = new Uint8Array(w * h);
+          for (let i = 0; i < gray.length; i++) gray[i] = (px[i * 4] * 77 + px[i * 4 + 1] * 151 + px[i * 4 + 2] * 28) >> 8;
+          text = QR.decode(gray, w, h);
+        }
+      }
+      if (text) {
+        if (gen !== pairGen) return;
+        stopPairCamera();
+        onText(text);
+        return;
+      }
+      pairScanTimer = setTimeout(step, 140);
+    };
+    step();
+  }
+
+  function pairErrorBack(msg, again) {
+    pairBusy = false;
+    pairStatus.textContent = msg;
+    if (again) again();
+  }
+
+  // ----- host -----
+  async function openPairHost() {
+    if (!Offline.supported()) { showToast("This browser can't make offline connections."); return; }
+    pairRole = "host";
+    pairGen++;
+    pairSheet.hidden = false;
+    pairShow({ title: "Add a phone", lead: "Getting ready…" });
+    await hostShowInvite();
+  }
+
+  async function hostShowInvite() {
+    const gen = pairGen;
+    const hub = jamTransport && jamTransport.hub;
+    if (!hub) return;
+    pairBusy = false;
+    try {
+      pairInvite = await hub.invite();
+    } catch (e) {
+      if (gen === pairGen) pairShow({ title: "Add a phone", lead: "Couldn't start. Make sure Wi-Fi (or a hotspot) is on.", main: { label: "Close", run: closePair } });
+      return;
+    }
+    if (gen !== pairGen) return;
+    const invite = pairInvite;
+    pairShow({
+      title: "Add a phone",
+      lead: "On the other phone: open GuitarScroll, tap ⋯ then Join a jam, then Join an offline jam, and scan this code.",
+      qr: invite.text,
+      main: { label: "Next: scan their code", run: () => hostScanReply(invite) },
+      alt: { label: "Copy code", run: async () => { pairStatus.textContent = (await copyText(invite.text)) ? "Code copied." : "Couldn't copy."; } },
+    });
+  }
+
+  function hostScanReply(invite) {
+    const gen = pairGen;
+    const accept = async (text) => {
+      if (pairBusy) return;
+      pairBusy = true;
+      pairShow({ title: "Connecting…", lead: "Keep both phones on the same Wi-Fi.", status: "" });
+      try {
+        await invite.accept(text);
+        if (gen !== pairGen) return;
+        pairInvite = null;
+        const n = jamTransport && jamTransport.hub ? jamTransport.hub.guestCount : 1;
+        pairBusy = false;
+        pairShow({
+          title: "Connected",
+          lead: n + (n === 1 ? " phone is" : " phones are") + " in the jam.",
+          main: { label: "Add another phone", run: () => hostShowInvite() },
+          alt: { label: "Done", run: closePair },
+        });
+      } catch (e) {
+        if (gen !== pairGen) return;
+        pairBusy = false;
+        pairShow({
+          title: "Scan their code",
+          lead: "That didn't connect. Check both phones are on the same Wi-Fi, then scan again.",
+          cam: true,
+          alt: { label: "Back", run: () => { pairInvite = null; hostShowInvite(); } },
+        });
+        startPairScan(accept, () => pairShowPaste(accept, "Back", () => { pairInvite = null; hostShowInvite(); }));
+      }
+    };
+    pairShow({
+      title: "Scan their code",
+      lead: "The other phone now shows a code. Hold this camera up to it.",
+      cam: true,
+      alt: { label: "Paste a code instead", run: () => { stopPairCamera(); pairShowPaste(accept, "Back", () => hostScanReply(invite)); } },
+    });
+    startPairScan(accept, (why) => pairShowPaste(accept, "Back", () => { pairInvite = null; hostShowInvite(); }, why));
+  }
+
+  function pairShowPaste(accept, backLabel, back, why) {
+    pairShow({
+      title: "Paste the code",
+      lead: why || "Paste the code from the other phone.",
+      paste: true,
+      alt: { label: backLabel, run: back },
+    });
+    $("#pair-paste").value = "";
+    $("#pair-paste-go").onclick = () => {
+      const v = $("#pair-paste").value.trim();
+      if (v) accept(v);
+    };
+  }
+
+  // ----- joiner -----
+  function openPairGuest() {
+    if (!Offline.supported()) { showToast("This browser can't make offline connections."); return; }
+    pairRole = "guest";
+    pairGen++;
+    pairBusy = false;
+    pairSheet.hidden = false;
+    guestScanInvite();
+  }
+
+  function guestScanInvite() {
+    const gen = pairGen;
+    const accept = async (text) => {
+      if (pairBusy) return;
+      pairBusy = true;
+      let joined;
+      try {
+        joined = await Offline.joinWithInvite(text);
+      } catch (e) {
+        if (gen !== pairGen) return;
+        pairBusy = false;
+        pairShow({ title: "Scan the host's code", lead: "That wasn't a GuitarScroll code. Try again.", cam: true,
+          alt: { label: "Paste a code instead", run: () => { stopPairCamera(); pairShowPaste(accept, "Back", guestScanInvite); } } });
+        startPairScan(accept, (why) => pairShowPaste(accept, "Back", guestScanInvite, why));
+        return;
+      }
+      if (gen !== pairGen) { joined.close(); return; }
+      pairShow({
+        title: "Show this to the host",
+        lead: "Hold your screen up to the host's camera. This closes by itself once you're connected.",
+        qr: joined.reply,
+        status: "Waiting for the host…",
+        alt: { label: "Cancel", run: () => { joined.close(); closePair(); } },
+      });
+      try {
+        await joined.ready;
+      } catch (e) {
+        if (gen !== pairGen) return;
+        joined.close();
+        pairBusy = false;
+        pairShow({ title: "Didn't connect", lead: "Check both phones are on the same Wi-Fi and try again.", main: { label: "Try again", run: guestScanInvite }, alt: { label: "Close", run: closePair } });
+        return;
+      }
+      if (gen !== pairGen) { joined.close(); return; }
+      closePair();
+      joinJam(joined.code, { connect: joined.connect, link: joined });
+    };
+    pairShow({
+      title: "Scan the host's code",
+      lead: "On the host's phone, tap Jam, then Add a phone. Hold your camera up to the code.",
+      cam: true,
+      alt: { label: "Paste a code instead", run: () => { stopPairCamera(); pairShowPaste(accept, "Back", guestScanInvite); } },
+    });
+    startPairScan(accept, (why) => pairShowPaste(accept, "Back", guestScanInvite, why));
+  }
+
+  $("#pair-close").addEventListener("click", closePair);
+  $("#jam-offline-join-btn").addEventListener("click", () => { closeJamSheet(); openPairGuest(); });
+  $("#jam-add-phone-btn").addEventListener("click", () => { closeJamSheet(); openPairHost(); });
+  $("#jam-offline-btn").addEventListener("click", async () => {
+    // Switch from an online jam (or none yet) to an offline one
+    if (jamIsHost()) endHostJam();
+    // The online attempt, if there was one, unwinds on the next tick
+    for (let i = 0; i < 20 && jamStarting; i++) await new Promise((r) => setTimeout(r, 25));
+    if (!Offline.supported()) { jamSheetStatus.textContent = "This browser can't make offline connections."; return; }
+    const hub = Offline.createHub({ code: "" });
+    await startHostJam({ connect: hub.connect, hub });
+    if (jamIsHost() && jamOffline) { closeJamSheet(); openPairHost(); }
+    else hub.close();
+  });
+
   // ── Jam ──
   // The host publishes the open chart, then where they are in it. Followers
   // render that chart (it may not be in their library) and scroll to the same
@@ -3242,6 +3520,15 @@
     jamJoinBlock.hidden = true;
     jamJoinedBlock.hidden = true;
     jamCodeEl.textContent = jamCode;
+    $("#jam-add-phone-btn").hidden = !jamOffline;
+    $("#jam-offline-btn").hidden = jamOffline;
+    // A code and a link mean nothing without internet: pairing is by scanning
+    jamCodeEl.hidden = jamOffline;
+    document.querySelector("#jam-code-block .jam-actions").hidden = jamOffline;
+    if (jamOffline) {
+      jamSheetTitle.textContent = "Offline jam";
+      jamSheetLead.textContent = "Everyone needs to be on the same Wi-Fi, or your phone's hotspot. No internet needed. Add each phone by scanning codes.";
+    }
     showJoinError("");
     refreshJamChrome();
     refreshNearbyPrompt();
@@ -3408,9 +3695,19 @@
     lastSentPlayKey = "";
     stopJamPump();
     try { session.end(); } catch (e) { /* socket already gone */ }
+    closeOfflineLink();
     closeJamSheet();
     syncNearby();
     refreshJamChrome();
+  }
+
+  // Tears down whichever side of an offline link this phone holds
+  function closeOfflineLink() {
+    const t = jamTransport;
+    jamTransport = null;
+    jamOffline = false;
+    if (t && t.hub) setTimeout(() => t.hub.close(), 400); // let the "end" message go out first
+    if (t && t.link) t.link.close();
   }
 
   function dropFollowQuiet() {
@@ -3420,6 +3717,7 @@
     if (session && session.role === "follow") {
       jamSession = null;
       try { session.close(); } catch (e) { /* already closed */ }
+      closeOfflineLink();
     }
   }
 
@@ -3609,8 +3907,9 @@
     syncJamDataset();
   }
 
-  function makeJamSession() {
+  function makeJamSession(transport) {
     const session = Jam.createSession({
+      ...(transport ? { connect: transport.connect, brokers: ["offline"] } : {}),
       onStatus(status) {
         if (jamSession !== session) return;
         jamLinkStatus = status;
@@ -3664,7 +3963,7 @@
     }, 10000);
   }
 
-  async function startHostJam() {
+  async function startHostJam(transport) {
     if (jamIsFollow() || followRev) return;
     if (jamIsHost()) { openHostSheet(); return; }
     const song = songs.find((s) => s.id === currentSongId);
@@ -3674,10 +3973,13 @@
     }
     jamStarting = true;
     const code = Jam.newCode();
+    if (transport && transport.hub) transport.hub.setCode(code);
     jamCode = code;
     jamPeerCount = 0;
     jamLinkStatus = "connecting";
-    const session = makeJamSession();
+    jamOffline = !!transport;
+    jamTransport = transport ? { hub: transport.hub } : null;
+    const session = makeJamSession(transport);
     jamSession = session;
     openHostSheet();
     refreshJamChrome();
@@ -3690,19 +3992,19 @@
       jamFlushPlay(true);
       startJamPump();
       syncNearby();
-      if (window.Analytics) {
+      if (window.Analytics && !jamOffline) {
         window.Analytics.track("jam-start", { song_title: current.title || "" });
       }
       refreshJamChrome();
     } catch (e) {
       if (jamSession !== session) return;
-      jamSheetStatus.textContent = "Couldn't connect. Check your connection and try again.";
+      jamSheetStatus.textContent = "Couldn't connect. Check your connection and try again, or start an offline jam.";
     } finally {
       jamStarting = false;
     }
   }
 
-  async function joinJam(raw) {
+  async function joinJam(raw, transport) {
     const code = Jam.normalizeCode(raw);
     if (!code) {
       openJoinSheet(typeof raw === "string" ? String(raw).trim().slice(0, 120) : "");
@@ -3735,9 +4037,11 @@
     closeHostLibrary();
     jamCode = code;
     jamLinkStatus = "connecting";
-    setJamQuery(code);
-    showJoining("Looking for jam " + code + "…");
-    const session = makeJamSession();
+    jamOffline = !!transport;
+    jamTransport = transport ? { link: transport.link } : null;
+    if (!transport) setJamQuery(code);
+    showJoining(transport ? "Connected. Getting the chart…" : "Looking for jam " + code + "…");
+    const session = makeJamSession(transport);
     jamSession = session;
     const gen = ++jamJoinGen;
     armJamWait();
@@ -3767,7 +4071,7 @@
   }
 
   function nearbyBlocked() {
-    return jamIsHost() || jamIsFollow() || !!followRev || !jamSheet.hidden;
+    return jamIsHost() || jamIsFollow() || !!followRev || !jamSheet.hidden || jamOffline;
   }
 
   function hideNearbyPrompt() {
@@ -3817,7 +4121,7 @@
   }
 
   function syncNearby() {
-    if (jamIsHost() && jamCode) {
+    if (jamIsHost() && jamCode && !jamOffline) {
       const song = songs.find((s) => s.id === currentSongId);
       nearbyWant = {
         code: jamCode,

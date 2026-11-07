@@ -366,6 +366,30 @@
     </div>
   </div>
 
+  <div id="pair-sheet" class="pair-sheet" hidden>
+    <div class="pair-card" role="dialog" aria-modal="true" aria-labelledby="pair-title">
+      <header class="pair-head">
+        <h2 id="pair-title"></h2>
+        <button type="button" id="pair-close" class="icon-btn" aria-label="Close"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </header>
+      <p id="pair-lead" class="jam-lead"></p>
+      <div id="pair-qr-box" class="pair-qr-box" hidden><canvas id="pair-qr" aria-label="Pairing code"></canvas></div>
+      <div id="pair-cam-box" class="pair-cam-box" hidden>
+        <video id="pair-video" playsinline muted></video>
+        <span class="pair-frame" aria-hidden="true"></span>
+      </div>
+      <div id="pair-paste-box" class="pair-paste-box" hidden>
+        <textarea id="pair-paste" rows="3" placeholder="Paste the code here" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+        <button type="button" id="pair-paste-go" class="text-btn">Use this code</button>
+      </div>
+      <p id="pair-status" class="jam-status" aria-live="polite"></p>
+      <div class="pair-actions">
+        <button type="button" id="pair-alt" class="text-btn"></button>
+        <button type="button" id="pair-main" class="jam-join-go"></button>
+      </div>
+    </div>
+  </div>
+
   <div id="jam-sheet" class="jam-sheet" hidden>
     <div class="jam-card" role="dialog" aria-modal="true" aria-labelledby="jam-sheet-title">
       <h2 id="jam-sheet-title">Jam</h2>
@@ -377,6 +401,8 @@
           <button type="button" id="jam-copy-btn" class="text-btn">Copy link</button>
           <button type="button" id="jam-share-btn" class="text-btn">Share</button>
         </div>
+        <button type="button" id="jam-add-phone-btn" class="jam-offline-btn" hidden>Add a phone</button>
+        <button type="button" id="jam-offline-btn" class="jam-offline-link">No internet? Start an offline jam</button>
         <button type="button" id="jam-end-btn" class="jam-end-btn">End jam</button>
       </div>
       <form id="jam-join-block" hidden>
@@ -384,6 +410,7 @@
         <p id="jam-join-error" class="jam-join-error" hidden></p>
         <p id="jam-join-status" class="jam-status" hidden></p>
         <button type="submit" id="jam-join-go" class="jam-join-go">Join</button>
+        <button type="button" id="jam-offline-join-btn" class="jam-offline-link">No internet? Join an offline jam</button>
       </form>
       <div id="jam-joined-block" hidden>
         <p id="jam-joined-text" class="jam-joined-text"></p>
@@ -411,6 +438,8 @@
   <script src="analytics.js"></script>
   <script src="pitch.js"></script>
   <script src="chords.js"></script>
+  <script src="qr.js"></script>
+  <script src="offline.js"></script>
   <script src="jam.js"></script>
   <script src="app.js"></script>
 </body>
