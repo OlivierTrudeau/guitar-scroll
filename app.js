@@ -1565,6 +1565,7 @@
   function startScroll() {
     if (jamIsFollow() || followRev) return;
     scrolling = true;
+    controlsHeld = false;
     paintTransport(true);
     hideNextUp();
 
@@ -1601,6 +1602,7 @@
       const maxScroll = songContent.scrollHeight - songContent.clientHeight;
       if (songContent.scrollTop >= maxScroll) {
         stopScroll();
+        controlsHeld = true;
         onScrollReachedEnd();
         return;
       }
@@ -1696,19 +1698,16 @@
   const TEXT_KEY = "guitarscroll_text_size";
   const FOCUS_KEY = "guitarscroll_focus";
   let textSize = 13.5;
-  let focusOnPlay = true;
+  const focusOnPlay = false; // the title bar always stays
   try {
     const t = parseFloat(localStorage.getItem(TEXT_KEY));
     if (TEXT_SIZES.includes(t)) textSize = t;
-    if (localStorage.getItem(FOCUS_KEY) === "off") focusOnPlay = false;
   } catch (e) { /* private mode */ }
   const textPop = $("#text-pop");
   const textSizeBtn = $("#text-size-btn");
   const textSmaller = $("#text-smaller");
   const textLarger = $("#text-larger");
   const textSizeVal = $("#text-size-val");
-  const focusToggle = $("#focus-toggle");
-  focusToggle.checked = focusOnPlay;
 
   function applyTextSize(size, keepPlace) {
     // Keep the same spot in the song under the reader's eyes while the text reflows
@@ -1740,11 +1739,6 @@
   textSizeBtn.addEventListener("click", () => setTextPop(textPop.hidden));
   textSmaller.addEventListener("click", () => stepText(-1));
   textLarger.addEventListener("click", () => stepText(1));
-  focusToggle.addEventListener("change", () => {
-    focusOnPlay = focusToggle.checked;
-    try { localStorage.setItem(FOCUS_KEY, focusOnPlay ? "on" : "off"); } catch (e) { /* private mode */ }
-    playerView.classList.toggle("is-focus", focusOnPlay && scrolling);
-  });
   songContent.addEventListener("pointerdown", () => setTextPop(false));
   applyTextSize(textSize, false);
 
@@ -1754,13 +1748,18 @@
   const CONTROLS_FADE_MS = 2000;
   const controlsEl = $("#scroll-controls");
   let controlsFadeTimer = 0;
-  function showControls() {
+  // When the song runs out, the scroller stops with the last line in view.
+  // The transport stays out of the way until the player touches the screen.
+  let controlsHeld = false;
+  function showControls(fromTouch) {
     clearTimeout(controlsFadeTimer);
     controlsFadeTimer = 0;
+    if (fromTouch === true) controlsHeld = false;
+    if (controlsHeld) { controlsEl.classList.add("is-faded"); return; }
     controlsEl.classList.remove("is-faded");
     if (scrolling) controlsFadeTimer = setTimeout(() => controlsEl.classList.add("is-faded"), CONTROLS_FADE_MS);
   }
-  playerView.addEventListener("pointerdown", () => { if (controlsEl.classList.contains("is-faded") || controlsFadeTimer) showControls(); }, true);
+  playerView.addEventListener("pointerdown", () => { if (controlsEl.classList.contains("is-faded") || controlsFadeTimer) showControls(true); }, true);
 
   function paintTransport(playing) {
     // Runs after `scrolling` has been updated by the caller
