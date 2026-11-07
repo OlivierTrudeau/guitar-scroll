@@ -1484,9 +1484,9 @@
 
     // The strumming pattern is what a player glances at while playing, so it
     // lives in the bar that stays put above the scrolling chart.
-    songMeta.innerHTML = song.strum
-      ? `<span class="meta-tag strum-tag"><strong>Strum</strong> ${esc(song.strum)}</span>`
-      : "";
+    songMeta.innerHTML =
+      (song.capo ? `<span class="meta-tag"><strong>Capo</strong> ${esc(song.capo)}</span>` : "") +
+      (song.strum ? `<span class="meta-tag strum-tag"><strong>Strum</strong> ${esc(song.strum)}</span>` : "");
 
     let contentHTML = "";
     lastParsedItems = parseBody(song.body || "");
