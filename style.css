@@ -1649,7 +1649,7 @@ html, body {
   bottom: calc(max(18px, var(--safe-bottom) + 10px) + 78px);
   z-index: 45;
   display: flex; align-items: center; gap: 6px;
-  padding: 14px 6px 10px 16px;
+  padding: 12px 6px 12px 16px;
   background: var(--float-bg);
   -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   border: 1px solid var(--border); border-radius: 18px;
@@ -1659,10 +1659,6 @@ html, body {
 }
 .next-up[hidden] { display: none; }
 @keyframes next-up-in { from { opacity: 0; transform: translateY(14px); } }
-.next-up-bar { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--track); }
-.next-up-fill { display: block; height: 100%; width: 100%; background: var(--accent); transform-origin: left; }
-.next-up.counting .next-up-fill { animation: next-up-count var(--count-ms, 20000ms) linear forwards; }
-@keyframes next-up-count { to { transform: scaleX(0); } }
 .next-up-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .next-up-text small { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--accent-ink); }
 .next-up-text strong { font: 600 18px/1.2 var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
