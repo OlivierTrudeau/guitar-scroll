@@ -734,7 +734,7 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 12px 20px 4px;
+  padding: 10px 20px 10px;
   flex-shrink: 0;
 }
 .song-meta:empty { display: none; }
@@ -747,6 +747,7 @@ html, body {
   font-weight: 600;
 }
 .meta-tag strong { color: var(--text2); font-weight: 500; margin-right: 3px; }
+.meta-tag.strum-tag { font-family: var(--mono); font-size: 13px; letter-spacing: .04em; }
 .meta-tag.rusty { border-color: var(--accent-dim); color: var(--accent-ink); }
 .meta-tag.rusty strong { color: var(--accent-ink); opacity: .8; }
 
