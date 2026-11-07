@@ -169,6 +169,10 @@ html, body {
   transition: opacity .18s ease, transform .22s ease;
 }
 .view.active { opacity: 1; pointer-events: auto; }
+/* Edge swipe back: the page being dragged away is opaque and lifted over the
+   screen it reveals, which is drawn underneath (see the edge swipe in app.js). */
+.view.swipe-over { z-index: 2; opacity: 1; background: var(--bg); box-shadow: 0 0 28px rgba(0, 0, 0, .35); }
+.view.swipe-under { z-index: 1; opacity: 1; transition: none; pointer-events: none; will-change: transform, filter; }
 
 /* ── Tab bar (Songs / Practice / Tuner) ── */
 .tabbar {
