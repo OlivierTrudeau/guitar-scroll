@@ -3063,6 +3063,61 @@
   const BACK_DISTANCE = 90;
   let edgeSwipe = null;
 
+  // The screen a back-swipe lands on. Null when the back button does something
+  // other than change screen (leaving a followed jam), so there is nothing to peek at.
+  function swipeDestination(viewId) {
+    if (viewId === "player-view" && (jamIsFollow() || followRev)) return null;
+    return viewId === "practice-time-view" ? statsView : libraryView;
+  }
+  const tabbarEl = document.querySelector(".tabbar");
+
+  // Render the destination now (no side effects: no showView, no stopping the
+  // scroller) so it is fully drawn the moment the drag starts. It stays hidden
+  // until the drag becomes a swipe.
+  function prepareSwipeDest(s) {
+    s.dest = swipeDestination(s.view.id);
+    if (s.dest === libraryView) renderLibrary(); // stats is already drawn from when it was opened
+  }
+  // Show the destination under the sliding page.
+  function beginSwipePeek(s) {
+    s.view.classList.add("swipe-over");
+    if (!s.dest) return;
+    s.srcId = s.view.id;
+    // Pin the sliding page's size: the destination may have a tab bar, which
+    // changes the inset that sizes every screen.
+    s.view.style.bottom = (appEl.clientHeight - s.view.offsetHeight) + "px";
+    s.dest.classList.add("swipe-under");
+    s.clipTabs = !!tabbarEl && getComputedStyle(tabbarEl).display === "none"; // only a tab bar that is new to the screen needs revealing
+    appEl.dataset.view = s.dest.id; // brings the destination's own tab bar and insets
+    s.peeking = true;
+  }
+  function paintSwipePeek(s) {
+    if (!s.peeking) return;
+    const p = Math.min(1, s.dx / window.innerWidth);
+    s.dest.style.transform = "translateX(" + (-s.dir * (1 - p) * window.innerWidth * 0.26) + "px)";
+    s.dest.style.filter = "brightness(" + (0.72 + 0.28 * p).toFixed(3) + ")";
+    // The tab bar only shows in the strip the page has uncovered
+    if (s.clipTabs) tabbarEl.style.clipPath = s.dir > 0 ? "inset(0 " + (window.innerWidth - s.dx) + "px 0 0)" : "inset(0 0 0 " + (window.innerWidth - s.dx) + "px)";
+  }
+  // Put everything the peek touched back. Called on abort and after a commit.
+  function endSwipePeek(s) {
+    s.view.classList.remove("swipe-over");
+    s.view.style.bottom = "";
+    if (!s.peeking) return;
+    s.peeking = false;
+    s.dest.classList.remove("swipe-under");
+    s.dest.style.transform = "";
+    s.dest.style.filter = "";
+    if (tabbarEl) tabbarEl.style.clipPath = "";
+  }
+  function abortSwipe(s) {
+    if (s.peeking) appEl.dataset.view = s.srcId;
+    endSwipePeek(s);
+    s.view.style.transition = "";
+    s.view.style.transform = "";
+    s.view.style.opacity = "";
+  }
+
   function sheetOpen() {
     return !!document.querySelector(".jam-sheet:not([hidden])");
   }
@@ -3076,6 +3131,7 @@
     const fromRight = t.clientX >= window.innerWidth - EDGE_PX;
     if (!fromLeft && !fromRight) return;
     edgeSwipe = { x: t.clientX, y: t.clientY, dir: fromLeft ? 1 : -1, active: false, dx: 0, sel, view: document.getElementById(appEl.dataset.view) };
+    prepareSwipeDest(edgeSwipe);
   }, { passive: true });
 
   document.addEventListener("touchmove", (e) => {
@@ -3089,6 +3145,7 @@
       if (dx < 8) return;
       s.active = true;
       s.view.style.transition = "none";
+      beginSwipePeek(s);
     }
     e.preventDefault(); // keeps the browser's own back gesture out of it
     const now = performance.now();
@@ -3096,7 +3153,9 @@
     s.lastT = now;
     s.dx = Math.max(0, dx);
     s.view.style.transform = "translateX(" + s.dx * s.dir + "px)";
-    s.view.style.opacity = String(1 - Math.min(0.5, s.dx / (window.innerWidth * 1.2)));
+    // The page is opaque over the screen it reveals; only without one does it fade
+    if (!s.peeking) s.view.style.opacity = String(1 - Math.min(0.5, s.dx / (window.innerWidth * 1.2)));
+    paintSwipePeek(s);
   }, { passive: false });
 
   function endEdgeSwipe() {
@@ -3106,9 +3165,24 @@
     const view = s.view;
     const go = s.dx >= BACK_DISTANCE || (s.vel > 0.6 && s.dx > 30);
     if (!go) {
-      view.style.transition = "";
-      view.style.transform = "";
-      view.style.opacity = "";
+      // Give up: the page slides back over the destination, which then goes away
+      if (s.peeking) {
+        view.style.transition = "transform .2s ease-out";
+        view.style.transform = "translateX(0)";
+        s.dest.style.transition = "transform .2s ease-out, filter .2s ease-out";
+        s.dest.style.transform = "translateX(" + (-s.dir * window.innerWidth * 0.26) + "px)";
+        s.dest.style.filter = "brightness(.72)";
+        let ended = false;
+        const back = () => {
+          if (ended) return;
+          ended = true;
+          s.dest.style.transition = "";
+          abortSwipe(s);
+        };
+        setTimeout(back, 220);
+        return;
+      }
+      abortSwipe(s);
       return;
     }
     // Carry on from where the finger left off, all the way off the screen in one
@@ -3118,7 +3192,14 @@
     const ms = Math.round(Math.min(260, Math.max(120, remaining / Math.max(0.9, s.vel || 0, 1.4))));
     view.style.transition = "transform " + ms + "ms cubic-bezier(.2,.7,.3,1), opacity " + ms + "ms ease-out";
     view.style.transform = "translateX(" + W * s.dir + "px)";
-    view.style.opacity = "0";
+    if (s.peeking) {
+      s.dest.style.transition = "transform " + ms + "ms cubic-bezier(.2,.7,.3,1), filter " + ms + "ms ease-out";
+      s.dest.style.transform = "translateX(0)";
+      s.dest.style.filter = "brightness(1)";
+      if (s.clipTabs) { tabbarEl.style.transition = "clip-path " + ms + "ms cubic-bezier(.2,.7,.3,1)"; tabbarEl.style.clipPath = "inset(0 0 0 0)"; }
+    } else {
+      view.style.opacity = "0";
+    }
     let done = false;
     const finish = () => {
       if (done) return;
@@ -3126,6 +3207,11 @@
       view.removeEventListener("transitionend", onEnd);
       const sel = s.sel;
       document.querySelector(sel).click(); // the new screen takes over (the old one is now inactive and invisible)
+      if (s.dest === libraryView && s.peeking) renderLibrary(); // pick up anything the player just banked
+      if (s.dest) s.dest.style.transition = "none";
+      if (tabbarEl) tabbarEl.style.transition = "";
+      endSwipePeek(s);
+      if (s.dest) { void s.dest.offsetWidth; s.dest.style.transition = ""; }
       view.style.transition = "none";
       view.style.transform = "";
       view.style.opacity = "";
@@ -3140,7 +3226,7 @@
   document.addEventListener("touchcancel", () => {
     const s = edgeSwipe;
     edgeSwipe = null;
-    if (s && s.active) { s.view.style.transition = ""; s.view.style.transform = ""; s.view.style.opacity = ""; }
+    if (s && s.active) abortSwipe(s);
   });
 
 
