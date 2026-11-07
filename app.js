@@ -245,7 +245,14 @@
   // estimated length over the distance the scroller has to cover.
   function estimateSpeed(items, scrollDistance) {
     let seconds = 0;
-    for (const item of items) seconds += LINE_SECONDS[item.type] || 3;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      // With Auto pace, every blank line after the first in a run is a pause
+      // hint that adds its own dwell on top of the scroll (see paceHints), so
+      // counting it here as well would slow the whole song down for it.
+      if (item.type === "empty" && autoPaceOn && i > 0 && items[i - 1].type === "empty") continue;
+      seconds += LINE_SECONDS[item.type] || 3;
+    }
     seconds = Math.min(600, Math.max(60, seconds));
     const pxPerSec = scrollDistance / seconds;
     const est = pxPerSec / (4 * fontScale);
@@ -254,6 +261,7 @@
 
   function applyEstimatedSpeed(song) {
     if (!song || song.speed || !songContent.clientHeight) return;
+    if (autoPaceOn && learnedBase(song)) return; // a speed it has learned beats a guess
     refreshFontScale();
     const distance = songContent.scrollHeight - songContent.clientHeight - 100;
     if (distance <= 0) return;
@@ -483,7 +491,7 @@
     closeChordCard();
     stopScroll();
     // Leaving the player stops the practice clock and banks whatever it counted
-    if (view !== playerView) { stopPracticeClock(); endShuffleRun(); }
+    if (view !== playerView) { paceEnd(); stopPracticeClock(); endShuffleRun(); }
     // Leaving the tuner view should always release the mic
     if (view !== tunerView) stopTuner();
   }
@@ -1423,6 +1431,7 @@
 
   function renderParsed(parsed) {
     let html = "";
+    const runs = Pace.blankRuns(parsed);
     for (let i = 0; i < parsed.length; i++) {
       const item = parsed[i];
       switch (item.type) {
@@ -1431,10 +1440,15 @@
           // lines at the start, in runs, or beside a heading would only stack up.
           const prev = parsed[i - 1];
           const next = parsed[i + 1];
-          if (!prev || prev.type === "empty" || prev.type === "section") break;
-          if (!next || next.type === "section") break;
+          // Extra blank lines are not drawn, but they still mean "give me a
+          // moment here": a zero-height marker Auto pace turns into a dwell.
+          const hint = runs[i] ? `<span class="pace-hint" data-n="${runs[i]}"></span>` : "";
+          if (!prev || prev.type === "empty" || prev.type === "section" || !next || next.type === "section") {
+            html += hint;
+            break;
+          }
           // A block element: the newline after it would render as a blank line of its own
-          html += `<span class="line-empty"></span>`;
+          html += `<span class="line-empty"></span>` + hint;
           break;
         }
         case "section":
@@ -1474,13 +1488,15 @@
   // previous song after the new one.
   function renderSong(song, opts) {
     opts = opts || {};
+    paceEnd(); // bank what the last sitting taught before the chart changes
     currentSongId = song.id || null;
     playerSongTitle.textContent = song.title || "Untitled";
     playerSongArtist.textContent = song.artist || "";
 
     // A song that knows its speed opens ready to play at it; the rest fall back
     // to the default rather than inheriting the previous song's speed.
-    applySpeed(song.speed || DEFAULT_SPEED);
+    if (!opts.follow) reconcileSongPace(song);
+    applySpeed(opts.follow ? (song.speed || DEFAULT_SPEED) : songBaseSpeed(song));
 
     // The strumming pattern is what a player glances at while playing, so it
     // lives in the bar that stays put above the scrolling chart.
@@ -1498,6 +1514,8 @@
     layoutSheetBlocks(true);
     if (!opts.follow) applyEstimatedSpeed(song);
     if (!opts.follow) maybeShowChordHint();
+    if (!opts.follow) paceBegin(song);
+    paintPace();
   }
 
   function openPlayer(id) {
@@ -1513,6 +1531,7 @@
     showView(playerView);
     layoutSheetBlocks(true);
     applyEstimatedSpeed(song);
+    paceNoteStartSpeed();
     if (hosting) jamFlushPlay(true);
     startPracticeClock(id);
     refreshJamChrome();
@@ -1581,19 +1600,25 @@
     let last = performance.now();
     let accum = 0;
     refreshFontScale();
+    paceResume(last);
 
     function tick(now) {
       if (!scrolling) return;
       const dt = now - last;
       last = now;
-      accum += speed * fontScale * dt * 0.004;
+      // `speed` is the user's own multiplier; Auto pace only bends it locally
+      // (exactly 1 when it is off), so a +/- tap is never undone by the next frame.
+      accum += speed * fontScale * dt * 0.004 * paceFactor(dt);
       if (accum >= 1) {
         const px = Math.floor(accum);
         songContent.scrollTop += px;
         accum -= px;
       }
+      paceAutoTop = songContent.scrollTop;
+      paceSample(now);
       const maxScroll = songContent.scrollHeight - songContent.clientHeight;
       if (songContent.scrollTop >= maxScroll) {
+        if (pace) pace.atEnd = true;
         stopScroll();
         controlsHeld = true;
         onScrollReachedEnd();
@@ -1675,6 +1700,7 @@
 
   function stopScroll() {
     const wasScrolling = scrolling;
+    if (wasScrolling) pacePause();
     scrolling = false;
     paintTransport(false);
     if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
@@ -1804,6 +1830,394 @@
   function updateSpeedLabel() {
     speedLabel.textContent = (speedEstimated ? "≈" : "") + formatSpeed(speed);
   }
+
+  // ── Auto pace ──
+  // The scroller learns how each song is really played, from the things a
+  // player already does when it is off: dragging the sheet back or ahead,
+  // pausing to catch up, tapping +/-. Extra blank lines in the chart are
+  // read as "a moment here". The math lives in pace.js; this is the wiring.
+  //
+  // Nothing here changes `speed`, the user's multiplier, while a song plays,
+  // so the label never moves on its own. What a sitting taught about the
+  // overall speed is folded into the song's base when it is closed.
+  const AUTOPACE_KEY = "guitarscroll_autopace";
+  let autoPaceOn = true;
+  try { if (localStorage.getItem(AUTOPACE_KEY) === "off") autoPaceOn = false; } catch (e) { /* private mode */ }
+  const autoPaceToggle = $("#autopace-toggle");
+  const paceResetBtn = $("#pace-reset");
+  autoPaceToggle.checked = autoPaceOn;
+
+  const PACE_WINDOW_MS = 25000; // how far back a correction reaches, in playing time
+  const PACE_MIN_WINDOW_MS = 4000; // less than this to go on is just a reposition
+  const PACE_NAV_SCREENS = 0.6; // a drag further than this is a jump, not feedback
+  const PACE_PAUSE_MIN_MS = 800;
+  const PACE_PAUSE_MAX_MS = 8000; // longer pauses are breaks, not "wait for me"
+  const PACE_READ_LINE = 0.35; // where on screen the reader is, for hint timing
+  const PACE_SMOOTH_MS = 500; // a changed profile eases in rather than jumps
+  const PACE_SAVE_MS = 2000;
+
+  let pace = null; // the sitting with the open song, see paceBegin()
+  let paceAutoTop = -1; // scrollTop the scroller itself last set
+  let paceSaveTimer = 0;
+
+  function learnedBase(song) {
+    const p = song && song.pace;
+    if (!p || !(p.b > 0) || (p.s || 0) !== (song.speed || 0)) return 0;
+    return clampSpeed(p.b);
+  }
+
+  function songBaseSpeed(song) {
+    return (autoPaceOn && learnedBase(song)) || song.speed || DEFAULT_SPEED;
+  }
+
+  // An edited chart may no longer line up with what was learned. Small fixes
+  // (a chord, a typo) keep it; adding or cutting more than a tenth of the
+  // lines starts over. A new speed typed in the editor replaces a learned one.
+  function reconcileSongPace(song) {
+    const p = song.pace;
+    if (!p || typeof p !== "object") { delete song.pace; return; }
+    const h = Pace.bodyHash(song.body);
+    if (p.h === h) return;
+    const lines = Pace.lineCount(song.body);
+    if (!p.l || Math.abs(lines - p.l) > Math.max(1, p.l * 0.1)) {
+      delete song.pace;
+    } else {
+      p.h = h;
+      p.l = lines;
+    }
+    saveSongs();
+  }
+
+  function paceSchedulesSave() {
+    clearTimeout(paceSaveTimer);
+    paceSaveTimer = setTimeout(() => { paceSaveTimer = 0; saveSongs(); }, PACE_SAVE_MS);
+  }
+  function paceFlushSave() {
+    if (!paceSaveTimer) return;
+    clearTimeout(paceSaveTimer);
+    paceSaveTimer = 0;
+    saveSongs();
+  }
+
+  function paceStore(song, logs, base) {
+    const p = song.pace && typeof song.pace === "object" ? song.pace : {};
+    if (Pace.isFlat(logs)) delete p.f; else p.f = Pace.encode(logs);
+    if (base != null) { p.b = base; p.s = song.speed || 0; }
+    p.h = Pace.bodyHash(song.body);
+    p.l = Pace.lineCount(song.body);
+    if (!p.f && !(p.b > 0 && p.b !== (song.speed || 0))) delete song.pace;
+    else song.pace = p;
+  }
+
+  function paceMax() {
+    return songContent.scrollHeight - songContent.clientHeight;
+  }
+  function paceFrac() {
+    const max = paceMax();
+    return max > 0 ? Math.min(1, Math.max(0, songContent.scrollTop / max)) : 0;
+  }
+  function paceRowPx() {
+    return (parseFloat(getComputedStyle(songContent).fontSize) || BASE_FONT_PX) * 1.55;
+  }
+
+  // Learning only happens on this phone's own song, with Auto pace on, never
+  // while following someone else's jam.
+  function paceLearning() {
+    return !!(autoPaceOn && pace && pace.song.id === currentSongId && songs.includes(pace.song) && !jamIsFollow() && !followRev);
+  }
+
+  function paceBegin(song) {
+    const p = song.pace && typeof song.pace === "object" ? song.pace : null;
+    pace = {
+      song,
+      logs: Pace.decode(p && p.f),
+      startLogBase: Math.log(speed),
+      segs: [], seg: null, hist: [],
+      drag: null, pausedAt: null, started: false, atEnd: false,
+      hints: [], hintKey: "", smooth: null, rate: 0,
+      changed: false,
+    };
+  }
+  // The speed the sitting starts from, once any estimate has been made
+  function paceNoteStartSpeed() {
+    if (pace && !pace.started) pace.startLogBase = Math.log(speed);
+  }
+
+  // Ends the sitting and keeps what it taught: speed taps become the song's
+  // base and local shape, and the profile's overall level moves into the base
+  // so the label shows the song's real average next time.
+  function paceEnd() {
+    const s = pace;
+    if (!s) return;
+    pace = null;
+    if (!autoPaceOn || !songs.includes(s.song) || s.song.id !== currentSongId) return;
+    if (s.seg) paceSegClose(s, paceFrac());
+    let logs = s.logs;
+    let logBase = s.startLogBase;
+    const taps = Pace.learnFromTaps(logs, s.segs, s.startLogBase);
+    if (taps) { logs = taps.logs; logBase = taps.base; }
+    if (!taps && !s.changed) { paceFlushSave(); return; }
+    const norm = Pace.renormalize(logs, logBase, MIN_SPEED, MAX_SPEED);
+    paceStore(s.song, norm.logs, norm.base);
+    clearTimeout(paceSaveTimer);
+    paceSaveTimer = 0;
+    saveSongs();
+  }
+
+  // ── Where the scroller ran, for later ──
+  function paceSegOpen(s, p) { s.seg = { a: p, lb: Math.log(speed) }; }
+  function paceSegClose(s, p) {
+    if (s.seg && p > s.seg.a + 0.002) s.segs.push({ a: s.seg.a, b: p, lb: s.seg.lb });
+    s.seg = null;
+  }
+  // Positions are fractions of the scrollable height, so anything that
+  // changes that height (text size, rotation, the title bar) moves every
+  // fraction a little. Evidence never spans such a change.
+  function paceLayoutKey() {
+    return songContent.scrollHeight + "|" + songContent.clientHeight + "|" + songContent.clientWidth;
+  }
+  function paceResetHistory(t, p) {
+    pace.hist = [{ t, p }];
+    pace.histKey = paceLayoutKey();
+  }
+  function paceSample(now) {
+    if (!pace) return;
+    if (pace.histKey !== paceLayoutKey()) { paceResetHistory(now, paceFrac()); return; }
+    const h = pace.hist;
+    if (h.length && now - h[h.length - 1].t < 200) return;
+    h.push({ t: now, p: paceFrac() });
+    while (h.length > 2 && now - h[1].t > PACE_WINDOW_MS + 5000) h.shift();
+  }
+
+  // ── Blank-line hints ──
+  // Measured where they sit now; any reflow (text size, rotation, fonts
+  // arriving, a new chart) changes the key and they are measured again.
+  function paceHints() {
+    const max = paceMax();
+    const key = paceLayoutKey();
+    if (pace.hintKey === key) return pace.hints;
+    pace.hintKey = key;
+    pace.hints = [];
+    const marks = songContent.querySelectorAll(".pace-hint");
+    if (!marks.length || !(max > 0)) return pace.hints;
+    const row = paceRowPx();
+    const top = songContent.getBoundingClientRect().top - songContent.scrollTop;
+    const readAt = songContent.clientHeight * PACE_READ_LINE;
+    marks.forEach((m) => {
+      const n = parseInt(m.dataset.n, 10) || 0;
+      if (!n) return;
+      const h = Pace.makeHint(0, n, row);
+      // The pause is felt as the gap passes the line being read; keep the
+      // whole slowdown inside the range the scroller actually travels.
+      const y = m.getBoundingClientRect().top - top - readAt;
+      h.c = max > h.w ? Math.min(max - h.w / 2, Math.max(h.w / 2, y)) : max / 2;
+      pace.hints.push(h);
+    });
+    return pace.hints;
+  }
+
+  // The scroller's speed factor this frame: exactly 1 with Auto pace off.
+  function paceFactor(dt) {
+    if (!autoPaceOn || !pace || jamIsFollow() || followRev) return 1;
+    const max = paceMax();
+    if (!(max > 0)) return 1;
+    const target = Pace.factorAt(pace.logs, songContent.scrollTop / max);
+    pace.smooth = pace.smooth == null ? target : pace.smooth + (target - pace.smooth) * (1 - Math.exp(-Math.max(0, dt) / PACE_SMOOTH_MS));
+    const f = pace.smooth * Pace.hintFactor(paceHints(), songContent.scrollTop);
+    pace.rate = (speed * fontScale * 0.004 * f) / max; // fraction per ms
+    return f;
+  }
+
+  // ── Turning what the player did into evidence ──
+  // "At time tObs I was really at pObs; left alone, the scroller would be at
+  // pExp." Compared over the last ~25 s of playing, that is the speed ratio
+  // the stretch should have had.
+  function paceObserve(tFrom, pFrom, tObs, pExp, pObs, lr) {
+    const h = pace.hist;
+    let anchor = null;
+    for (let i = 0; i < h.length; i++) {
+      if (h[i].t >= tFrom - PACE_WINDOW_MS) { anchor = h[i]; break; }
+    }
+    paceResetHistory(tObs, pObs);
+    if (!anchor || tFrom - anchor.t < PACE_MIN_WINDOW_MS) return false;
+    const r = Pace.ratioOf(anchor.p, pExp, pObs);
+    if (!(r > 0.4 && r < 2.5)) return false; // that was navigation
+    const res = Pace.observe(pace.logs, anchor.p, Math.max(pFrom, pObs), r, lr);
+    if (!res.change) return false;
+    pace.logs = res.logs;
+    pace.changed = true;
+    pace.lastObs = { from: anchor.p, to: Math.max(pFrom, pObs), ratio: r, change: res.change };
+    paceStore(pace.song, pace.logs, null);
+    paceSchedulesSave();
+    paintPace();
+    return true;
+  }
+
+  // Compares where the reader went with where the scroller would have taken
+  // them. A tap, or a nudge of a few pixels, says nothing; a big jump is
+  // somebody finding their place.
+  function paceJudge(fromT, fromP, rate, lr, layoutKey) {
+    const now = performance.now();
+    const max = paceMax();
+    const pObs = paceFrac();
+    if (layoutKey !== paceLayoutKey()) {
+      paceResetHistory(now, pObs);
+      return "relayout";
+    }
+    const pExp = Math.min(1, fromP + rate * (now - fromT));
+    const off = (pObs - pExp) * max;
+    const moved = (pObs - fromP) * max;
+    if (Math.abs(off) < paceRowPx() * 0.6) return "none";
+    if (Math.abs(moved) > songContent.clientHeight * PACE_NAV_SCREENS) {
+      paceResetHistory(now, pObs);
+      return "jump";
+    }
+    return paceObserve(fromT, fromP, now, pExp, pObs, lr) ? "learned" : "skipped";
+  }
+
+  // Dragging the sheet while it plays
+  function paceDragStart(touching) {
+    if (!paceLearning() || !scrolling || !pace.started) return;
+    if (pace.drag) { pace.drag.touching = pace.drag.touching || touching; pace.drag.last = performance.now(); return; }
+    const now = performance.now();
+    const p = paceFrac();
+    pace.drag = { t: now, p, rate: pace.rate, touching, last: now, key: paceLayoutKey() };
+    paceSegClose(pace, p);
+    if (!touching) paceSettle();
+  }
+  function paceDragRelease() {
+    if (!pace || !pace.drag) return;
+    pace.drag.touching = false;
+    pace.drag.last = performance.now();
+    paceSettle();
+  }
+  // Wait for the flick to coast to a stop before reading where it landed
+  function paceSettle() {
+    clearTimeout(paceSettle.timer);
+    paceSettle.timer = setTimeout(function check() {
+      const d = pace && pace.drag;
+      if (!d) return;
+      if (d.touching || performance.now() - d.last < 250) { paceSettle.timer = setTimeout(check, 100); return; }
+      paceDragFinish();
+    }, 120);
+  }
+  function paceDragFinish() {
+    const d = pace && pace.drag;
+    if (!d) return;
+    pace.drag = null;
+    clearTimeout(paceSettle.timer);
+    pace.lastJudge = paceLearning() ? paceJudge(d.t, d.p, d.rate, Pace.LR_SWIPE, d.key) : "off";
+    if (scrolling) paceSegOpen(pace, paceFrac());
+  }
+  function paceDragMoved() {
+    const d = pace && pace.drag;
+    if (d && Math.abs(songContent.scrollTop - paceAutoTop) > 1) d.last = performance.now();
+  }
+
+  // Pause and play
+  function pacePause() {
+    if (!pace || !pace.started) return;
+    if (pace.drag) paceDragFinish();
+    const p = paceFrac();
+    paceSegClose(pace, p);
+    pace.pausedAt = pace.atEnd ? null : { t: performance.now(), p, rate: pace.rate, key: paceLayoutKey() };
+    pace.atEnd = false;
+  }
+  function paceResume(now) {
+    if (!pace) return;
+    const p = paceFrac();
+    const was = pace.pausedAt;
+    pace.pausedAt = null;
+    pace.started = true;
+    pace.smooth = null;
+    if (scrolling) paceSegOpen(pace, p);
+    if (!paceLearning() || !was) { if (pace) paceResetHistory(now, p); return; }
+    const gap = now - was.t;
+    if (was.key !== paceLayoutKey()) { paceResetHistory(now, p); pace.lastJudge = "relayout"; return; }
+    const moved = Math.abs(p - was.p) * paceMax();
+    if (gap > PACE_PAUSE_MAX_MS) { paceResetHistory(now, p); pace.lastJudge = "break"; return; }
+    if (gap < PACE_PAUSE_MIN_MS && moved < paceRowPx() * 0.6) { pace.lastJudge = "blip"; return; }
+    // Dragged back while paused: that is as clear as a swipe
+    pace.lastPause = { gap: Math.round(gap), moved: Math.round(moved) };
+    pace.lastJudge = paceJudge(was.t, was.p, was.rate, moved > paceRowPx() ? Pace.LR_SWIPE : Pace.LR_PAUSE, was.key);
+  }
+
+  // +/- : the base speed changes at once; where in the song it was changed is
+  // remembered and spread over the song when it is closed.
+  function paceNoteTap() {
+    if (!paceLearning() || !scrolling || !pace.seg) return;
+    const p = paceFrac();
+    paceSegClose(pace, p);
+    paceSegOpen(pace, p);
+  }
+
+  function paceHasShape() {
+    const song = pace && pace.song;
+    if (!song) return false;
+    return !Pace.isFlat(pace.logs) || !!learnedBase(song) || !!songContent.querySelector(".pace-hint");
+  }
+  function paintPace() {
+    const following = jamIsFollow() || !!followRev;
+    const on = autoPaceOn && !following && paceHasShape();
+    speedLabel.classList.toggle("is-paced", on);
+    speedLabel.title = on ? "Auto pace is shaping this song" : "";
+    const song = !following && songs.find((s) => s.id === currentSongId);
+    paceResetBtn.disabled = !(song && song.pace);
+  }
+
+  autoPaceToggle.addEventListener("change", () => {
+    const song = !jamIsFollow() && !followRev && songs.find((s) => s.id === currentSongId);
+    if (!autoPaceToggle.checked) paceEnd(); // keep what was learned up to now
+    else pace = null; // a sitting played without it has nothing to teach
+    const hadLearned = song ? learnedBase(song) : 0;
+    autoPaceOn = autoPaceToggle.checked;
+    try { localStorage.setItem(AUTOPACE_KEY, autoPaceOn ? "on" : "off"); } catch (e) { /* private mode */ }
+    if (song) {
+      // Only a speed the app learned or guessed changes hands; one the user dialled stays
+      if (hadLearned || learnedBase(song) || speedEstimated) {
+        applySpeed(songBaseSpeed(song));
+        applyEstimatedSpeed(song);
+        jamFlushPlay(true);
+      }
+      paceBegin(song);
+      if (scrolling) paceResume(performance.now());
+    }
+    paintPace();
+  });
+
+  paceResetBtn.addEventListener("click", () => {
+    const song = !jamIsFollow() && !followRev && songs.find((s) => s.id === currentSongId);
+    if (!song || !song.pace) return;
+    const hadLearned = learnedBase(song);
+    delete song.pace;
+    clearTimeout(paceSaveTimer);
+    paceSaveTimer = 0;
+    saveSongs();
+    if (hadLearned && autoPaceOn) {
+      applySpeed(song.speed || DEFAULT_SPEED);
+      applyEstimatedSpeed(song);
+      jamFlushPlay(true);
+    }
+    pace = null;
+    paceBegin(song);
+    if (scrolling) paceResume(performance.now());
+    paintPace();
+    showToast("Learned pacing cleared");
+  });
+
+  songContent.addEventListener("touchstart", () => paceDragStart(true), { passive: true });
+  songContent.addEventListener("touchend", paceDragRelease, { passive: true });
+  songContent.addEventListener("touchcancel", paceDragRelease, { passive: true });
+  songContent.addEventListener("wheel", () => paceDragStart(false), { passive: true });
+  songContent.addEventListener("scroll", paceDragMoved, { passive: true });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) paceFlushSave(); });
+
+  // For poking at it from the console: the current curve and what it last did
+  window.__gsPace = () => pace && {
+    on: autoPaceOn, logs: pace.logs.slice(), hints: paceHints().slice(), rate: pace.rate,
+    smooth: pace.smooth, lastObs: pace.lastObs || null, lastJudge: pace.lastJudge || null, lastPause: pace.lastPause || null,
+    segs: pace.segs.slice(), factorAt: (p) => Pace.factorAt(pace.logs, p),
+  };
 
   // ── Auto-import raw text files ──
   function autoImportFromText(text, filename) {
@@ -4413,11 +4827,13 @@
   scrollSlower.addEventListener("click", () => {
     if (jamIsFollow() || followRev) return;
     applySpeed(speed - (speed <= 5 ? 0.5 : 1));
+    paceNoteTap();
     jamFlushPlay(true);
   });
   scrollFaster.addEventListener("click", () => {
     if (jamIsFollow() || followRev) return;
     applySpeed(speed + (speed < 5 ? 0.5 : 1));
+    paceNoteTap();
     jamFlushPlay(true);
   });
 
