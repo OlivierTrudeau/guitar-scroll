@@ -2165,6 +2165,69 @@
     paceResetBtn.disabled = !(song && song.pace);
   }
 
+  // ── Seeing the pacing ──
+  // A small map of the song's speed in the Aa popover (the curve is relative
+  // to the player's own speed: the middle line is "your speed", above it is
+  // faster, below slower) with a marker for where the reader is, plus a live
+  // arrow beside the speed label whenever the scroller is off the base speed.
+  const paceMapEl = $("#pace-map");
+  const paceMapSvg = $("#pace-map-svg");
+  const paceNowEl = $("#pace-now");
+  let paceMapKey = "";
+  const PACE_MAP_W = 200, PACE_MAP_H = 44;
+
+  function paceFactorAtFrac(p) {
+    const max = paceMax();
+    return Pace.factorAt(pace.logs, p) * (max > 0 ? Pace.hintFactor(paceHints(), p * max) : 1);
+  }
+  function paceMapPath() {
+    const mid = PACE_MAP_H / 2, amp = mid - 3, span = Math.log(2);
+    let line = "";
+    const N = 80;
+    for (let i = 0; i <= N; i++) {
+      const f = paceFactorAtFrac(i / N);
+      const y = mid - Math.max(-1, Math.min(1, Math.log(f) / span)) * amp;
+      line += (i ? "L" : "M") + (i / N * PACE_MAP_W).toFixed(1) + " " + y.toFixed(1);
+    }
+    return { line, area: line + `L${PACE_MAP_W} ${mid}L0 ${mid}Z` };
+  }
+  function paceWord(f) {
+    if (f > 1.08) return "faster";
+    if (f < 0.92) return "slower";
+    return "your speed";
+  }
+  function updatePaceUi() {
+    const live = autoPaceOn && pace && !jamIsFollow() && !followRev && paceMax() > 0;
+    // Arrow by the speed label: shown only when pacing is clearly off the base speed
+    let trend = "";
+    if (live && scrolling) {
+      const f = paceFactorAtFrac(songContent.scrollTop / paceMax());
+      trend = f > 1.08 ? "up" : f < 0.92 ? "down" : "";
+    }
+    speedLabel.classList.toggle("trend-up", trend === "up");
+    speedLabel.classList.toggle("trend-down", trend === "down");
+    if (textPop.hidden) return;
+    const show = live && paceHasShape();
+    paceMapEl.hidden = !live;
+    if (!live) return;
+    const key = pace.logs.join(",") + "|" + songContent.scrollHeight + "|" + songContent.querySelectorAll(".pace-hint").length;
+    if (key !== paceMapKey) {
+      paceMapKey = key;
+      const d = paceMapPath();
+      $("#pace-map-line").setAttribute("d", d.line);
+      $("#pace-map-area").setAttribute("d", d.area);
+    }
+    const p = Math.max(0, Math.min(1, songContent.scrollTop / paceMax()));
+    const x = (p * PACE_MAP_W).toFixed(1);
+    const head = $("#pace-map-head");
+    head.setAttribute("x1", x); head.setAttribute("x2", x);
+    const f = paceFactorAtFrac(p);
+    paceNowEl.textContent = show
+      ? `Now ${formatSpeed(speed * f)} · ${paceWord(f)}`
+      : "Nothing learned yet. It adapts as you play.";
+  }
+  setInterval(updatePaceUi, 200);
+
   autoPaceToggle.addEventListener("change", () => {
     const song = !jamIsFollow() && !followRev && songs.find((s) => s.id === currentSongId);
     if (!autoPaceToggle.checked) paceEnd(); // keep what was learned up to now
