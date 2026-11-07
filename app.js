@@ -238,7 +238,7 @@
 
   // How long a player takes over each kind of line, in seconds. A guess, but
   // a song of N lines lasts roughly N times this, whatever its tempo.
-  const LINE_SECONDS = { "chord-lyric": 3.4, "inline-chord": 3.4, lyric: 3, "chord-only": 2.6, section: 1.6, empty: 1.7 };
+  const LINE_SECONDS = { "chord-lyric": 3.4, "inline-chord": 3.4, lyric: 3, "chord-only": 2.6, section: 1.6, empty: 0.4 };
   let lastParsedItems = [];
 
   // Picks a starting speed for a song that has none saved: spread the song's
@@ -1426,11 +1426,17 @@
     for (let i = 0; i < parsed.length; i++) {
       const item = parsed[i];
       switch (item.type) {
-        case "empty":
-          // Every blank line is kept at full row height: at a constant scroll
-          // speed, distance is time, so extra blank lines are pauses.
+        case "empty": {
+          // Section headings carry their own space above and below, so blank
+          // lines at the start, in runs, or beside a heading would only stack up.
+          const prev = parsed[i - 1];
+          const next = parsed[i + 1];
+          if (!prev || prev.type === "empty" || prev.type === "section") break;
+          if (!next || next.type === "section") break;
+          // A block element: the newline after it would render as a blank line of its own
           html += `<span class="line-empty"></span>`;
           break;
+        }
         case "section":
           html += `<span class="line-section">${esc(item.text)}</span>`;
           break;
