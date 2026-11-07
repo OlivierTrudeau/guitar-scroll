@@ -804,7 +804,7 @@ html, body {
   white-space: normal;
 }
 .line-lyric { color: var(--text); }
-.line-empty { display: block; height: 14px; }
+.line-empty { display: block; height: 1.55em; }
 .song-content > .line-section:first-child { margin-top: 4px; }
 .strum-pattern {
   display: block;
