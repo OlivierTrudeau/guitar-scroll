@@ -3330,18 +3330,21 @@
   // ── Shuffle run: after a picked song ends, offer the next one ──
   // The scroller reaching the bottom doesn't mean the song is over (the last
   // lines are often still being played), so the next song is offered with a
-  // countdown instead of being switched to at once. Touching the chart, or the
-  // card, stops the countdown; "Play now" goes immediately.
-  const NEXT_UP_MS = 20000;
+  // card that waits: nothing happens until "Play now" (or Skip / close) is tapped.
   const nextUp = $("#next-up");
   let shufRunning = false;
-  let nextUpTimer = 0;
 
+  // The card floats over the bottom of the chart, so while it is up the chart
+  // gets matching bottom padding and the last lines scroll clear above it.
+  function reserveNextUpSpace(on) {
+    if (!on) { songContent.style.paddingBottom = ""; return; }
+    const lift = parseFloat(getComputedStyle(nextUp).bottom) || 0;
+    songContent.style.paddingBottom = Math.ceil(lift + nextUp.offsetHeight + 28) + "px";
+    songContent.scrollTo({ top: songContent.scrollHeight, behavior: "smooth" });
+  }
   function hideNextUp() {
-    clearTimeout(nextUpTimer);
-    nextUpTimer = 0;
-    nextUp.classList.remove("counting");
     nextUp.hidden = true;
+    reserveNextUpSpace(false);
   }
   function endShuffleRun() {
     shufRunning = false;
@@ -3366,20 +3369,6 @@
     $("#next-up-title").textContent = song.title || "Untitled";
     $("#next-up-artist").textContent = song.artist || "";
   }
-  function startNextUpCountdown() {
-    clearTimeout(nextUpTimer);
-    nextUp.classList.remove("counting");
-    void nextUp.offsetWidth; // restart the bar's animation
-    nextUp.style.setProperty("--count-ms", NEXT_UP_MS + "ms");
-    nextUp.classList.add("counting");
-    nextUpTimer = setTimeout(playNextUp, NEXT_UP_MS);
-  }
-  function stopNextUpCountdown() {
-    clearTimeout(nextUpTimer);
-    nextUpTimer = 0;
-    nextUp.classList.remove("counting");
-    $("#next-up-fill").style.transform = "scaleX(0)";
-  }
   function onScrollReachedEnd() {
     if (!shufRunning || jamIsFollow() || followRev) return;
     // Queued requests come first. Otherwise the song just finished is
@@ -3389,16 +3378,15 @@
       advanceShuffle();
     }
     paintNextUp();
-    $("#next-up-fill").style.transform = "";
     nextUp.hidden = false;
     hideToast();
     closeChordCard();
-    startNextUpCountdown();
+    reserveNextUpSpace(true);
   }
   $("#next-up-go").addEventListener("click", playNextUp);
   $("#next-up-skip").addEventListener("click", () => {
     if (nextUpFromQueue) { shufQueue.push(shufQueue.shift()); saveQueue(); } else advanceShuffle();
-    paintNextUp(); $("#next-up-fill").style.transform = ""; startNextUpCountdown();
+    paintNextUp();
   });
   $("#next-up-stop").addEventListener("click", endShuffleRun);
   // Queue editing in the shuffle sheet
@@ -3447,8 +3435,6 @@
   $("#queue-done").addEventListener("click", closeQueuePicker);
   queuePicker.addEventListener("click", (e) => { if (e.target === queuePicker) closeQueuePicker(); });
 
-  // Still playing the last lines: touching the chart holds the countdown
-  songContent.addEventListener("pointerdown", () => { if (!nextUp.hidden && nextUpTimer) stopNextUpCountdown(); });
 
   // ── Edge swipe: go back ──
   // Drag in from either screen edge to return to the previous screen, with the
