@@ -151,6 +151,15 @@
           <span id="text-size-val" class="text-size-val">13.5</span>
           <button id="text-larger" class="text-step" type="button" aria-label="Larger text"><span style="font-size:21px">A</span></button>
         </div>
+        <div id="pace-map" class="pace-map" hidden>
+          <svg id="pace-map-svg" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true">
+            <line class="pm-mid" x1="0" y1="22" x2="200" y2="22"/>
+            <path id="pace-map-area" class="pm-area" d=""/>
+            <path id="pace-map-line" class="pm-line" d=""/>
+            <line id="pace-map-head" class="pm-head" x1="0" y1="0" x2="0" y2="44"/>
+          </svg>
+          <div class="pace-map-cap"><span>slower</span><span id="pace-now"></span><span>faster</span></div>
+        </div>
         <label class="text-pop-opt pace-opt"><input type="checkbox" id="autopace-toggle" checked><span>Auto pace<small>Learns from your swipes, pauses and blank lines</small></span></label>
         <button type="button" id="pace-reset" class="text-pop-link" disabled>Reset learned pacing</button>
       </div>
