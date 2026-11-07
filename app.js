@@ -1482,20 +1482,13 @@
     // to the default rather than inheriting the previous song's speed.
     applySpeed(song.speed || DEFAULT_SPEED);
 
-    songMeta.innerHTML = "";
-    if (song.capo) songMeta.innerHTML += `<span class="meta-tag"><strong>Capo</strong> ${esc(song.capo)}</span>`;
-    if (!opts.follow && song.speed) {
-      songMeta.innerHTML += `<span class="meta-tag"><strong>Speed</strong> ${esc(formatSpeed(song.speed))}</span>`;
-    }
-    if (!opts.follow) {
-      const rusty = isRusty(song.lastPlayed);
-      songMeta.innerHTML += `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
-    }
+    // The strumming pattern is what a player glances at while playing, so it
+    // lives in the bar that stays put above the scrolling chart.
+    songMeta.innerHTML = song.strum
+      ? `<span class="meta-tag strum-tag"><strong>Strum</strong> ${esc(song.strum)}</span>`
+      : "";
 
     let contentHTML = "";
-    if (song.strum) {
-      contentHTML += `<span class="strum-pattern">Strum: ${esc(song.strum)}</span>`;
-    }
     lastParsedItems = parseBody(song.body || "");
     contentHTML += renderParsed(lastParsedItems);
     songContent.innerHTML = contentHTML;
@@ -1931,17 +1924,9 @@
   }
 
   // Re-renders just the "last played" meta tag in the open player (after a play is recorded)
-  function renderLastPlayedMeta(song) {    const existing = songMeta.querySelector(".meta-tag.last-played");
-    const rusty = isRusty(song.lastPlayed);
-    const html = `<span class="meta-tag last-played${rusty ? " rusty" : ""}"><strong>Last played</strong> ${esc(formatLastPlayed(song.lastPlayed))}</span>`;
-    // Replace the existing tag in place if present
-    if (existing) {
-      existing.outerHTML = html;
-    // Otherwise append it (e.g. first play in this session)
-    } else {
-      songMeta.innerHTML += html;
-    }
-  }
+  // The last-played tag is no longer shown in the player header (the strum
+  // pattern took its place); callers still refresh it after a play.
+  function renderLastPlayedMeta() {}
 
   // Small "times practiced" badge for the library list
   function practiceCountBadge(count) {
