@@ -3991,6 +3991,7 @@
     if (hosting) jamHostLabel.textContent = "Jam " + jamCode + " · " + hostStatusLine();
     if (hosting && jamSheetMode === "host" && !jamSheet.hidden) {
       jamCodeEl.textContent = jamCode;
+      paintJamQr();
       jamSheetStatus.textContent = hostStatusLine();
     }
     syncJamDataset();
@@ -4016,10 +4017,28 @@
   }
 
   function jamShareUrl() {
-    const url = new URL(location.href);
+    // Just the site and the code: no test flags or old query bits in the link
+    const url = new URL(location.pathname, location.origin);
     url.searchParams.set("jam", jamCode);
-    url.hash = "";
     return url.toString();
+  }
+
+  // A QR of the join link: pointing a phone camera at it opens the site and
+  // joins the jam on its own, no code to type and no site to share.
+  const jamQrBox = $("#jam-qr-box");
+  let jamQrFor = "";
+  function paintJamQr() {
+    const show = !!jamCode && !jamOffline && jamIsHost();
+    jamQrBox.hidden = !show;
+    if (!show) { jamQrFor = ""; return; }
+    const url = jamShareUrl();
+    if (url === jamQrFor) return;
+    try {
+      QR.draw($("#jam-qr"), QR.encode(url, { ecc: "M" }), 8);
+      jamQrFor = url;
+    } catch (e) {
+      jamQrBox.hidden = true; // a link too long for a code: the copy/share buttons remain
+    }
   }
 
   function setJamQuery(code) {
@@ -4048,7 +4067,7 @@
     jamSheetMode = "host";
     jamSheet.hidden = false;
     jamSheetTitle.textContent = "Jam";
-    jamSheetLead.textContent = "Anyone with this code follows along, even if they don't have the song saved. They get the chart, the scroll, and the speed.";
+    jamSheetLead.textContent = "Have people scan this with their camera to join. They follow along even without the song saved: the chart, the scroll and the speed.";
     jamCodeBlock.hidden = false;
     jamJoinBlock.hidden = true;
     jamJoinedBlock.hidden = true;
@@ -4058,6 +4077,7 @@
     // A code and a link mean nothing without internet: pairing is by scanning
     jamCodeEl.hidden = jamOffline;
     document.querySelector("#jam-code-block .jam-actions").hidden = jamOffline;
+    paintJamQr();
     if (jamOffline) {
       jamSheetTitle.textContent = "Offline jam";
       jamSheetLead.textContent = "Everyone needs to be on the same Wi-Fi, or your phone's hotspot. No internet needed. Add each phone by scanning codes.";
