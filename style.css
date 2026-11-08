@@ -1728,3 +1728,8 @@ html, body {
 }
 .speed-label.trend-up::before { content: "\25B2"; }
 .speed-label.trend-down::before { content: "\25BC"; }
+
+/* Join-by-scan code in the host sheet */
+.jam-qr-box { background: #fff; border-radius: 16px; padding: 10px; margin: 4px auto 6px; width: min(62%, 240px); }
+.jam-qr-box[hidden] { display: none; }
+.jam-qr-box canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
