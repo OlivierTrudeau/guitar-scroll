@@ -1801,7 +1801,7 @@
   // browser drops the lock whenever the page is hidden, so it is asked for
   // again when the page comes back.
   const awakeReasons = new Set();
-  const AWAKE_GRACE_MS = 3 * 60 * 1000;
+  const AWAKE_GRACE_MS = 30 * 1000;
   let awakeGraceTimer = 0;
   let wakeLock = null;
   let wakeLockBusy = false;
