@@ -1788,7 +1788,12 @@
     scrollToggle.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
     scrollToggle.classList.toggle("active", !!playing);
     // Nobody touches the screen while they play, so keep it from dimming and locking
-    keepAwake("scroll", !!playing);
+    // When the scroller stops (the song ended, a pause) the player is often
+    // still playing the last lines. Hold the screen on for a while longer
+    // instead of letting it lock at once.
+    clearTimeout(awakeGraceTimer);
+    if (playing) keepAwake("scroll", true);
+    else if (awakeReasons.has("scroll")) awakeGraceTimer = setTimeout(() => keepAwake("scroll", false), AWAKE_GRACE_MS);
   }
 
   // ── Keep the screen awake ──
@@ -1796,6 +1801,8 @@
   // browser drops the lock whenever the page is hidden, so it is asked for
   // again when the page comes back.
   const awakeReasons = new Set();
+  const AWAKE_GRACE_MS = 3 * 60 * 1000;
+  let awakeGraceTimer = 0;
   let wakeLock = null;
   let wakeLockBusy = false;
 
